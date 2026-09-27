@@ -1,0 +1,8 @@
+.deps/
+native/qml/**/*.qrc
+artifacts/
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*

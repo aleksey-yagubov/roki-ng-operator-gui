@@ -1,0 +1,3 @@
+# PySide6 must use the same Qt build family as the native QML plugin.
+PySide6==6.11.2
+msgpack>=1.1,<2

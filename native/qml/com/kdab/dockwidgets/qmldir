@@ -1,0 +1,22 @@
+module com.kdab.dockwidgets
+linktarget kddockwidgetsplugin
+optional plugin kddockwidgetsplugin
+classname com_kdab_dockwidgetsPlugin
+typeinfo kddockwidgets.qmltypes
+depends QtQuick
+prefer :/qt/qml/com/kdab/dockwidgets/
+DropArea 2.0 DropArea.qml
+TitleBarBase 2.0 TitleBarBase.qml
+TitleBar 2.0 TitleBar.qml
+Group 2.0 Group.qml
+FloatingWindow 2.0 FloatingWindow.qml
+TabBarBase 2.0 TabBarBase.qml
+TabBar 2.0 TabBar.qml
+Separator 2.0 Separator.qml
+MDIResizeHandlerHelper 2.0 MDIResizeHandlerHelper.qml
+RubberBand 2.0 RubberBand.qml
+TitleBarButton 2.0 TitleBarButton.qml
+ClassicIndicatorsOverlay 2.0 ClassicIndicatorsOverlay.qml
+ClassicIndicator 2.0 ClassicIndicator.qml
+DockWidgetView 2.0 DockWidgetView.qml
+

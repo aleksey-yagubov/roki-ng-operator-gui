@@ -1,0 +1,36 @@
+diff --git a/src/qtcommon/DragControllerWayland_p.cpp b/src/qtcommon/DragControllerWayland_p.cpp
+index ff0a271..3784939 100644
+--- a/src/qtcommon/DragControllerWayland_p.cpp
++++ b/src/qtcommon/DragControllerWayland_p.cpp
+@@ -83,6 +83,7 @@ bool StateDraggingWayland::handleDragEnter(DragMoveEvent *ev, DropArea *dropArea
+ 
+     dropArea->hover(q->m_windowBeingDragged.get(), globalEventPos);
+ 
++    ev->setDropAction(Qt::MoveAction);
+     ev->accept();
+     return true;
+ }
+@@ -125,5 +126,9 @@ bool StateDraggingWayland::handleDragMove(DragMoveEvent *ev, DropArea *dropArea,
+ 
+     dropArea->hover(q->m_windowBeingDragged.get(), globalEventPos);
+ 
++    // The global event filter consumes this event; no QML DropArea handler
++    // remains to accept it. Keep the Wayland data offer accepted while moving.
++    ev->setDropAction(Qt::MoveAction);
++    ev->accept();
+     return true;
+ }
+diff --git a/src/qtquick/views/DropArea.cpp b/src/qtquick/views/DropArea.cpp
+index d06c9fc..f3ef597 100644
+--- a/src/qtquick/views/DropArea.cpp
++++ b/src/qtquick/views/DropArea.cpp
+@@ -21,6 +21,9 @@ DropArea::DropArea(Core::DropArea *dropArea, Core::View *parent)
+     , m_dropArea(dropArea)
+ {
+     Q_ASSERT(dropArea);
++    // MainWindow has no QML DropArea wrapper (unlike FloatingWindow).
++    // Allow Qt Quick to deliver Wayland QDrag events to this native view.
++    QQuickItem::setFlag(QQuickItem::ItemAcceptsDrops, true);
+ }
+ 
+ DropArea::~DropArea()
