@@ -1,0 +1,10 @@
+# Qt 6.7 adds AGL even when the macOS SDK no longer provides it.
+function(roki_remove_missing_agl)
+    if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
+        get_target_property(libraries WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
+        list(FILTER libraries EXCLUDE REGEX "AGL")
+        set_property(TARGET WrapOpenGL::WrapOpenGL PROPERTY INTERFACE_LINK_LIBRARIES "${libraries}")
+    endif()
+endfunction()
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2)
+roki_remove_missing_agl()

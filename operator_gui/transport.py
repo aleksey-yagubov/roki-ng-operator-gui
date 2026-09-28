@@ -88,6 +88,9 @@ class Transport(QObject):
             self.sock = sock
             if sys.platform.startswith("linux"):
                 sock.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_MTU_DISCOVER", 10), 2)
+            elif sys.platform == "darwin":
+                # Darwin SDK netinet/in.h: IP_DONTFRAG = 28.
+                sock.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_DONTFRAG", 28), 1)
             elif sys.platform == "win32":
                 sock.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_DONTFRAGMENT", 14), 1)
             else:

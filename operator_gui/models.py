@@ -53,9 +53,8 @@ class ParameterFilter(QSortFilterProxyModel):
         self.setSourceModel(model)
 
     def configure(self, group, search):
-        self.beginFilterChange()
         self.group, self.search = group, search.casefold()
-        self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+        self.invalidateFilter()
 
     def filterAcceptsRow(self, row, parent):
         name = self.sourceModel().items[row]["name"]
@@ -72,11 +71,10 @@ class LogFilter(QSortFilterProxyModel):
 
     @Slot(str, str, str)
     def configure(self, level, search, source):
-        self.beginFilterChange()
         self.level = LEVELS.get(level, 10)
         self.search = search.casefold()
         self.source = source.casefold()
-        self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+        self.invalidateFilter()
 
     def filterAcceptsRow(self, row, parent):
         item = self.sourceModel().items[row]

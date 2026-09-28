@@ -1,6 +1,8 @@
 """Explicit direct-gst video session; never starts hardware on connection."""
 
 import json
+import sys
+import time
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot, Qt
 from PySide6.QtGui import QImage
 
@@ -14,9 +16,11 @@ def video_request(values):
     codec = values["codec"]
     if codec not in ("h264", "jpeg"):
         raise ValueError("Неизвестный кодек")
-    sw, sh = integer("sensorWidth", 320, 4096), integer("sensorHeight", 240, 4096)
+    backend=values.get('backend','direct-gst')
+    if backend not in ('direct-gst','runtime'):raise ValueError('Неизвестный источник видео')
+    sw,sh=(1600,1300) if backend=='runtime' else (integer("sensorWidth",320,4096),integer("sensorHeight",240,4096))
     width, height = integer("width", 160, 1600), integer("height", 120, 1300)
-    depth = integer("depth", 8, 10)
+    depth = 10 if backend=='runtime' else integer("depth",8,10)
     if depth not in (8, 10) or width > sw or height > sh or width % 2 or height % 2:
         raise ValueError("RAW8/RAW10; выход должен быть чётным и не больше сенсора")
     if codec == "jpeg" and (width % 8 or height % 8):
@@ -24,9 +28,12 @@ def video_request(values):
     encoding = {"name": codec}
     if codec == "h264":
         encoding["bitrate"] = integer("bitrate", 100000, 20000000)
-    return dict(backend="direct-gst", sensor=dict(width=sw, height=sh, depth=depth),
+    if backend=='runtime' and (width>800 or height>650):raise ValueError('Runtime: максимум 800×650')
+    result=dict(backend=backend,
                 output=dict(width=width, height=height, fps=scalar({"type": "float", "min": 1, "max": 120}, values["fps"])),
                 codec=encoding, destination=dict(rtp_port=integer("port", 1024, 65535)), mtu=1400)
+    if backend=='direct-gst':result['sensor']=dict(width=sw,height=sh,depth=depth)
+    return result
 
 
 class Video(QObject):
@@ -51,11 +58,13 @@ class Video(QObject):
         self.local_busy = False
         self.unknown_create = False
         self.hide_on_stop = False
-        self.decoder = "vah264dec"
+        self.decoder = "avdec_h264" if sys.platform == "darwin" else "vah264dec"
         self.latency = 30
         self.output = "image"
         self.image = QImage()
         self.image_serial = 0
+        self.last_image_at = 0.
+        self.backend = 'direct-gst'
         session.response.connect(self.response)
         session.failed.connect(self.failed)
         session.changed.connect(self.connection)
@@ -80,7 +89,7 @@ class Video(QObject):
                    + f". По умолчанию: сенсор {sensor.get('width', '?')}x{sensor.get('height', '?')} RAW{sensor.get('depth', '?')}; "
                    + f"выход {output.get('width', '?')}x{output.get('height', '?')}, {output.get('fps', '?')} FPS."
                    if self.capabilities else "Возможности ещё не запрошены.")
-        return dict(phase=self.phase, error=self.error, pending=self.pending,
+        return dict(phase=self.phase, error=self.error, pending=self.pending,backend=self.backend,
                     sink=self.output,
                     canStart=not reason, startBlockedReason=reason,
                     canEditSettings=not self.info and not self.local_busy and not self.unknown_create
@@ -118,6 +127,7 @@ class Video(QObject):
     @Slot(object)
     def receive_image(self, image):
         self.image = image
+        self.last_image_at=time.monotonic()
         self.image_serial += 1
         self.imageChanged.emit()
 
@@ -137,6 +147,8 @@ class Video(QObject):
             return
         try:
             spec = video_request(values)
+            self.backend=spec['backend']
+            self.image=QImage();self.last_image_at=0.;self.image_serial+=1;self.imageChanged.emit()
             self.decoder = values["decoder"]
             from .video_receiver import receiver_description
             output = values.get("sink", "image")

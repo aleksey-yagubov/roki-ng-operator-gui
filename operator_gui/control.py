@@ -12,6 +12,17 @@ def scalar(meta, value):
             raise ValueError("Выберите значение из списка")
         return value
     kind = meta.get("type", "str")
+    if kind == 'object':
+        if hasattr(value,'toVariant'):value=value.toVariant()
+        if not isinstance(value,dict) or set(value)!=set(meta.get('fields',{})):
+            raise ValueError('Неверный набор полей')
+        result={}
+        for key,spec in meta['fields'].items():
+            descriptor=({'type':'bool'} if spec=='bool' else
+                        {'choices':spec} if isinstance(spec[0],str) else
+                        {'type':'float','min':spec[0],'max':spec[1]})
+            result[key]=scalar(descriptor,value[key])
+        return result
     if kind == "bool":
         if type(value) is not bool:
             raise ValueError("Ожидается да/нет")

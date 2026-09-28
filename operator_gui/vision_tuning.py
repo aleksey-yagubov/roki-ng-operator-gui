@@ -1,0 +1,205 @@
+"""Colour/camera tuning over params.*, explicit capture, frozen local preview."""
+import time
+
+from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer,Qt
+from PySide6.QtGui import QImage
+from PySide6.QtQuick import QQuickImageProvider
+
+from .control import scalar
+
+
+class TuningImages(QQuickImageProvider):
+    def __init__(self,model):super().__init__(QQuickImageProvider.ImageType.Image);self.model=model
+    def requestImage(self,ident,size,requested_size):
+        image=self.model.overlay if ident.startswith('mask') else self.model.source
+        size.setWidth(image.width());size.setHeight(image.height());return image
+
+
+class VisionTuning(QObject):
+    changed=Signal()
+    catalogChanged=Signal()
+    def __init__(self,session,control,video,parent=None):
+        super().__init__(parent)
+        self.session,self.control,self.video=session,control,video
+        self.metas={};self.values={};self.drafts={};self.profiles=[];self.profile=''
+        self.queue=[];self.busy=False;self.notice='Загрузите настройки с робота.'
+        self.catalog_dirty=False
+        self.camera={};self.detector={};self.source=QImage();self.overlay=QImage()
+        self.lab=self.rgb=None;self.serial=0;self.selected_pixels=0;self.source_label='Нет снимка'
+        self.timer=QTimer(self);self.timer.setInterval(1000);self.timer.timeout.connect(self.status)
+        session.response.connect(self.response);session.failed.connect(self.failed);session.changed.connect(self.connection)
+
+    def keys(self,scope):
+        prefix='camera.' if scope=='camera' else 'vision.'+self.profile+'.'
+        return [k for k in self.metas if k.startswith(prefix)]
+
+    def rows(self,scope):
+        return [dict(key=k,meta=self.metas[k],value=self.drafts.get(k,self.values.get(k))) for k in self.keys(scope)]
+
+    @Property('QStringList',notify=catalogChanged)
+    def labKeys(self):return self.keys('lab')
+
+    @Property('QStringList',notify=catalogChanged)
+    def cameraKeys(self):return self.keys('camera')
+
+    @Property('QVariantMap',notify=changed)
+    def view(self):
+        return dict(profiles=self.profiles,profile=self.profile,labRows=self.rows('lab'),cameraRows=self.rows('camera'),
+            busy=self.busy,notice=self.notice,camera=self.camera,detector=self.detector,
+            serial=self.serial,hasImage=not self.source.isNull(),pixels=self.selected_pixels,sourceLabel=self.source_label,
+            dirty=bool(self.drafts),watching=self.timer.isActive(),metas=self.metas,values=self.values|self.drafts)
+
+    @Slot()
+    def connection(self):
+        if not self.session.connected:
+            self.timer.stop();self.queue=[];self.busy=False;self.metas={};self.values={};self.drafts={}
+            self.profiles=[];self.profile='';self.camera={};self.detector={}
+            self.source=QImage();self.overlay=QImage();self.lab=self.rgb=None;self.serial+=1
+            self.notice='Нет соединения. Перечитайте настройки после подключения.';self.catalogChanged.emit();self.changed.emit()
+
+    def next(self):
+        if self.queue:
+            self.busy=True;op,args,context=self.queue.pop(0);self.session.request(op,args,context)
+        else:
+            self.busy=False
+            if self.catalog_dirty:self.catalog_dirty=False;self.catalogChanged.emit()
+        self.changed.emit()
+
+    @Slot()
+    def refresh(self):
+        if self.busy or not self.session.connected:return
+        if self.drafts:self.notice='Сохраните или отмените черновик перед загрузкой.';self.changed.emit();return
+        self.metas={};self.values={}
+        self.catalog_dirty=True
+        self.queue=[('detection.list',{},'tuning:profiles')]
+        for prefix in ('vision.','camera.'):
+            self.queue.append(('params.keys',{'prefix':prefix,'limit':8},'tuning:keys:'+prefix))
+        self.next()
+
+    @Slot()
+    def status(self):
+        if self.busy or not self.session.connected:return
+        self.queue=[('camera.status',{},'tuning:status'),('detection.status',{},'tuning:status')];self.next()
+
+    @Slot(bool)
+    def watch(self,enabled):
+        if enabled and self.session.connected:self.timer.start();self.status()
+        else:self.timer.stop()
+        self.changed.emit()
+
+    def response(self,op,result,context):
+        if not context.startswith('tuning:'):return
+        if context=='tuning:profiles':
+            self.profiles=result['profiles']
+            if self.profile not in self.profiles:self.profile=self.profiles[0] if self.profiles else ''
+        elif context.startswith('tuning:keys:'):
+            prefix=context.split(':',2)[2]
+            requests=[]
+            for key in result['items']:
+                requests.append(('params.describe',{'key':key},'tuning:load'))
+            if result['items']:
+                requests.append(('params.get',{'keys':result['items']},'tuning:load'))
+            if result.get('next_offset') is not None:
+                requests.append(('params.keys',{'prefix':prefix,'offset':result['next_offset'],'limit':8},context))
+            self.queue=requests+self.queue
+        elif context=='tuning:load':
+            if op=='params.describe':self.metas[result['key']]=result
+            elif 'values' in result:self.values.update(result['values'])
+            else:self.values[result['key']]=result['value']
+        elif context=='tuning:save':
+            self.values.update(result['values'])
+            for key in result['values']:self.drafts.pop(key,None)
+            self.notice='Настройки сохранены на роботе.';self.recompute();self.changed.emit();return
+        elif context=='tuning:freeze':
+            self.values.update(result['values'])
+            for key in result['values']:self.drafts.pop(key,None)
+            self.notice=f"Автоматика зафиксирована по кадру {result['source_sequence']}.";self.changed.emit();return
+        elif context=='tuning:status':
+            if op=='camera.status':self.camera=result
+            else:self.detector=result
+        elif context=='tuning:action':
+            if op.startswith('camera.'):self.camera=result
+            else:self.detector=result
+            self.changed.emit();return
+        self.next()
+
+    def failed(self,op,error,context):
+        if context.startswith('tuning:'):
+            self.notice=str(error.get('message',error) if isinstance(error,dict) else error)
+            self.busy=False;self.queue=[];self.catalogChanged.emit();self.changed.emit()
+
+    @Slot(str)
+    def select(self,profile):
+        if profile in self.profiles:self.profile=profile;self.recompute();self.catalogChanged.emit();self.changed.emit()
+
+    @Slot(str,'QVariant')
+    def edit(self,key,value):
+        try:self.drafts[key]=scalar(self.metas[key],value);self.recompute()
+        except (KeyError,ValueError,TypeError) as exc:self.notice=str(exc)
+        self.changed.emit()
+
+    @Slot(str)
+    def defaults(self,scope):
+        for key in self.keys(scope):self.drafts[key]=self.metas[key]['default']
+        self.recompute();self.changed.emit()
+
+    @Slot()
+    def discard(self):self.drafts={};self.recompute();self.changed.emit()
+
+    @Slot(str)
+    def save(self,scope):
+        if self.busy:return
+        keys=[k for k in self.keys(scope) if k in self.drafts]
+        if not keys:return
+        self.control.command('params.set',{'values':{k:self.drafts[k] for k in keys},
+            'expected_values':{k:self.values[k] for k in keys}},manual=False,job=False,context='tuning:save')
+
+    @Slot(str)
+    def freeze(self,group):
+        if self.busy:return
+        if group in ('all','exposure','white_balance'):
+            self.control.command('camera.controls.freeze',{'group':group},manual=False,job=False,context='tuning:freeze')
+
+    @Slot(str)
+    def action(self,op):
+        if op not in ('camera.start','camera.stop','detection.start','detection.stop'):return
+        args={'with_imu':False} if op=='camera.start' else {'profile':self.profile} if op=='detection.start' else {}
+        self.control.command(op,args,job=False,context='tuning:action')
+
+    @Slot()
+    def snapshot(self):
+        required=[f'vision.{self.profile}.{axis}_{suffix}' for axis in ('l','a','b') for suffix in ('min','max')]
+        if self.busy or any(k not in self.values for k in required):
+            self.notice='Сначала загрузите настройки и выберите цветовой фильтр.';self.changed.emit();return
+        if self.video.image.isNull() or time.monotonic()-getattr(self.video,'last_image_at',0)>3:
+            self.notice='Нет свежего QImage. Запустите runtime-видео с выводом appsink → QImage.';self.changed.emit();return
+        from .lab_preview import pixels,rgb_lab
+        self.source=self.video.image.scaled(480,390,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+        self.rgb=pixels(self.source);self.lab=rgb_lab(self.rgb)
+        self.source_label=f'Снимок декодированного {self.video.backend}, локальный №{self.video.image_serial}; не UnicamSequence'
+        self.recompute();self.changed.emit()
+
+    def recompute(self):
+        if self.lab is None:return
+        from .lab_preview import overlay
+        prefix='vision.'+self.profile+'.';all_values=self.values|self.drafts
+        values={key[len(prefix):]:value for key,value in all_values.items() if key.startswith(prefix)}
+        if any(k not in values for k in ('l_min','l_max','a_min','a_max','b_min','b_max')):return
+        if any(values[k+'_min']>values[k+'_max'] for k in ('l','a','b')):
+            self.notice='Нижняя граница не должна превышать верхнюю.';return
+        self.overlay,self.selected_pixels=overlay(self.rgb,self.lab,values);self.serial+=1
+
+    @Slot(float,float,int)
+    def pick(self,u,v,tolerance):
+        if self.lab is None or not (0<=u<1 and 0<=v<1) or not 0<=tolerance<=30:return
+        import numpy as np
+        h,w=self.lab.shape[:2];x,y=int(u*w),int(v*h)
+        patch=self.lab[max(0,y-3):min(h,y+4),max(0,x-3):min(w,x+4)].reshape(-1,3)
+        for i,axis in enumerate(('l','a','b')):
+            for suffix,quantile,sign in [('min',10,-1),('max',90,1)]:
+                key=f'vision.{self.profile}.{axis}_{suffix}'
+                if key not in self.metas:return
+                m=self.metas[key];value=round(float(np.percentile(patch[:,i],quantile)))+sign*tolerance
+                self.drafts[key]=max(m['min'],min(m['max'],value))
+        self.notice='Пипетка создала черновик по области 7×7; проверьте маску перед сохранением.'
+        self.recompute();self.changed.emit()

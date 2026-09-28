@@ -77,7 +77,7 @@ ColumnLayout {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "Применение: " + ({live: "сразу", next_job: "со следующего движения", restart: "после перезапуска", next_frame: "со следующего кадра"}[backend.parameter.apply] || backend.parameter.apply || "-")
+                text: "Применение: " + ({live: "сразу", next_job: "со следующего движения", restart: "после перезапуска", next_frame: "со следующего кадра", next_request:"следующий запрос камеры",next_localisation:"при следующем запуске локализации"}[backend.parameter.apply] || backend.parameter.apply || "-")
             }
             ValueEditor {
                 id: editor
@@ -97,6 +97,7 @@ ColumnLayout {
                     onClicked: backend.saveParameter(backend.view.paramKey, editor.value)
                 }
                 Button { text: "Перечитать"; enabled: backend.view.connected && backend.view.paramKey !== ""; onClicked: backend.inspectParameter(backend.view.paramKey) }
+                Button { text: "Вернуть стандартное"; enabled: editor.enabled && backend.parameter.default !== undefined; onClicked: backend.saveParameter(backend.view.paramKey,backend.parameter.default) }
             }
             Label { visible: !controls.view.owns; text: "Для записи нажмите «Получить управление» в верхней панели."; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { text: controls.view.error; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }

@@ -5,6 +5,23 @@ import com.kdab.dockwidgets 2.0 as KDDW
 
 ApplicationWindow {
     id: window
+    function applyMacPalette() {
+        if (Qt.platform.os === "osx") {
+            palette.window = "#f0f1f3"
+            palette.windowText = "#202124"
+            palette.base = "#ffffff"
+            palette.alternateBase = "#f4f5f7"
+            palette.text = "#202124"
+            palette.button = "#e8eaed"
+            palette.buttonText = "#202124"
+            palette.highlight = "#2463b4"
+            palette.highlightedText = "#ffffff"
+            palette.placeholderText = "#626974"
+            palette.disabled.windowText = "#787e87"
+            palette.disabled.text = "#787e87"
+            palette.disabled.buttonText = "#787e87"
+        }
+    }
     objectName: "operatorWindow"
     visible: true
     width: 1200
@@ -13,7 +30,7 @@ ApplicationWindow {
     minimumHeight: 700
     title: "ROKI NG Operator"
     onClosing: Qt.quit()
-    property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, catalogDock, parametersDock, dataDock, logsDock, diagnosticsDock]
+    property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, catalogDock, parametersDock, fieldDock, visionDock, dataDock, logsDock, diagnosticsDock]
     Loader {
         id: videoWindowLoader
         onStatusChanged: if (status === Loader.Error) video.media_error("Не удалось загрузить окно видео QML")
@@ -59,6 +76,8 @@ ApplicationWindow {
                     MenuItem { text: "Состояние"; onTriggered: showDock(statusDock) }
                     MenuItem { text: "Слоты и тесты"; onTriggered: showDock(catalogDock) }
                     MenuItem { text: "Параметры"; onTriggered: showDock(parametersDock) }
+                    MenuItem { text: "Поле и ворота"; onTriggered: showDock(fieldDock) }
+                    MenuItem { text: "Цвета и камера"; onTriggered: showDock(visionDock) }
                     MenuItem { text: "Источники данных"; onTriggered: showDock(dataDock) }
                     MenuItem { text: "Журнал"; onTriggered: showDock(logsDock) }
                     MenuItem { text: "Диагностика"; onTriggered: showDock(diagnosticsDock) }
@@ -154,6 +173,20 @@ ApplicationWindow {
             ParametersPanel { anchors.fill: parent; anchors.margins: 8 }
         }
         KDDW.DockWidget {
+            id: fieldDock
+            objectName: "fieldDock"
+            uniqueName: "field"
+            title: "Поле и ворота"
+            FieldPanel { anchors.fill: parent; anchors.margins: 8 }
+        }
+        KDDW.DockWidget {
+            id:visionDock
+            objectName:"visionDock"
+            uniqueName:"visionTuning"
+            title:"Цвета и камера"
+            VisionPanel {anchors.fill:parent;anchors.margins:8}
+        }
+        KDDW.DockWidget {
             id: dataDock
             objectName: "dataDock"
             uniqueName: "data"
@@ -175,6 +208,7 @@ ApplicationWindow {
             DiagnosticsPanel { anchors.fill: parent; anchors.margins: 8 }
         }
         Component.onCompleted: {
+        window.applyMacPalette()
             addDockWidget(connectionDock, KDDW.KDDockWidgets.Location_OnLeft, null, Qt.size(330, 450))
             connectionDock.addDockWidgetAsTab(manualDock)
             connectionDock.addDockWidgetAsTab(videoDock)
@@ -182,6 +216,8 @@ ApplicationWindow {
             addDockWidget(statusDock, KDDW.KDDockWidgets.Location_OnRight, connectionDock)
             statusDock.addDockWidgetAsTab(catalogDock)
             statusDock.addDockWidgetAsTab(parametersDock)
+            statusDock.addDockWidgetAsTab(fieldDock)
+            statusDock.addDockWidgetAsTab(visionDock)
             statusDock.addDockWidgetAsTab(dataDock)
             statusDock.addDockWidgetAsTab(diagnosticsDock)
             statusDock.addDockWidgetAsTab(imageDock)

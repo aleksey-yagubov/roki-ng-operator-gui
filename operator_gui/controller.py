@@ -12,6 +12,8 @@ from .transport import Session
 from .control import Control, scalar
 from .data_sources import DataSources
 from .video import Video
+from .field_editor import FieldEditor
+from .vision_tuning import VisionTuning
 
 
 def pretty(value):
@@ -35,6 +37,7 @@ class Controller(QObject):
         self.transport.notification.connect(self._notification)
         self.transport.diagnostic.connect(self._log)
         self.control = Control(self.transport, self._log, self)
+        self.field_editor = FieldEditor(self.transport,self.control,self)
         self.control.barrierIssued.connect(self._barrier)
         self.data_sources = DataSources(self.transport, self)
         self.control.barrierIssued.connect(self.data_sources.barrier)
@@ -73,6 +76,7 @@ class Controller(QObject):
         self.clock.start()
         self._log("INFO", "Клиент запущен. Подключение только по явному действию оператора.")
         self.video = Video(self.transport, self.control, self._log, self)
+        self.vision_tuning = VisionTuning(self.transport,self.control,self.video,self)
 
     @Property("QVariantMap", notify=changed)
     def view(self):
