@@ -86,3 +86,12 @@ class LocalisationTests(unittest.TestCase):
         self.assertIn('timeout',self.model.view['notice'])
         self.model.check()
         self.assertEqual(len(self.session.requests),2)
+
+    def test_success_remains_visible_after_status_response(self):
+        self.model.check()
+        self.session.response.emit('system.capabilities', {'localisation': {'mode': 'diagnostic_only'}}, 'localisation:capabilities')
+        self.session.response.emit('localisation.status', {'running': False, 'error': None}, 'localisation:status')
+        self.assertIn('Проверка успешна', self.model.view['notice'])
+        self.assertIn('доступна', self.model.view['status'])
+        self.assertIn('Камера + IMU', self.model.view['notice'])
+        self.assertFalse(self.control.commands)

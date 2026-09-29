@@ -51,7 +51,7 @@ class Localisation(QObject):
                             'Проверяю возможности робота…' if self.checking else
                             'Нужно обновить сервис робота: локализация отсутствует' if self.checked and not self.available else
                             'Проверьте возможности робота' if not self.checked else
-                            'Остановлена' if not self.state.get('running') else
+                            'Локализация доступна — не запущена' if not self.state.get('running') else
                             'Ошибка' if self.state.get('error') else
                             'Нет свежей оценки' if not fresh or not sane else
                             'Диагностический кандидат — не подтверждённая позиция'))
@@ -117,7 +117,10 @@ class Localisation(QObject):
                 self.pending = False
                 self.state = result
                 self.received = time.monotonic()
-                self.notice = 'Координаты: начало в центре, +X вдоль поля вверх, +Y влево; yaw от +X.'
+                self.notice = ('Локализация работает. Координаты: начало в центре, +X вдоль поля вверх, +Y влево; yaw от +X.'
+                               if result.get('running') else
+                               'Проверка успешна: робот поддерживает локализацию. Для запуска получите управление, '
+                               'включите MANUAL, нажмите «Камера + IMU», задайте стартовую позу и нажмите «Запустить с этой позой».')
             elif op == 'camera.start':
                 self.notice = 'Камера запущена. Дождитесь синхронизации IMU перед запуском локализации.'
         else:
