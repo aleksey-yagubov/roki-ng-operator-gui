@@ -16,6 +16,8 @@ class Localisation(QObject):
         self.state = {}
         self.received = None
         self.pending = False
+        self.checking = False
+        self.checked = False
         self.notice = 'Проверьте доступность локализации на роботе.'
         self.timer = QTimer(self)
         self.timer.setInterval(500)
@@ -39,13 +41,16 @@ class Localisation(QObject):
                 all(type(x) in (float, int) and math.isfinite(x) for x in pose))
         fresh = (self.session.connected and self.state.get('running', False) and
                  not self.state.get('error') and age is not None and 0 <= age <= 1500)
-        return dict(available=self.available, pending=self.pending,
+        return dict(available=self.available, pending=self.pending, checking=self.checking, checked=self.checked,
                     running=self.state.get('running', False), watching=self.timer.isActive(),
                     notice=self.notice, error=self.state.get('error') or '',
                     pose=pose if sane and fresh else [], ageMs=age,
                     fresh=fresh, result=result, geometry=self.state.get('geometry') or {},
                     configurationId=self.state.get('configuration_id') or '',
                     status=('Нет связи' if not self.session.connected else
+                            'Проверяю возможности робота…' if self.checking else
+                            'Нужно обновить сервис робота: локализация отсутствует' if self.checked and not self.available else
+                            'Проверьте возможности робота' if not self.checked else
                             'Остановлена' if not self.state.get('running') else
                             'Ошибка' if self.state.get('error') else
                             'Нет свежей оценки' if not fresh or not sane else
@@ -53,7 +58,10 @@ class Localisation(QObject):
 
     @Slot()
     def check(self):
-        if self.session.connected:
+        if self.session.connected and not self.checking:
+            self.checking = True
+            self.notice = 'Запрашиваю возможности у робота…'
+            self.changed.emit()
             self.session.request('system.capabilities', {}, 'localisation:capabilities')
 
     @Slot()
@@ -97,6 +105,8 @@ class Localisation(QObject):
 
     def response(self, op, result, context):
         if context == 'localisation:capabilities':
+            self.checking = False
+            self.checked = True
             self.available = isinstance(result.get('localisation'), dict)
             self.notice = ('Локализация доступна. Камера должна работать с синхронизацией IMU.'
                            if self.available else 'Установленный runtime не поддерживает локализацию.')
@@ -116,6 +126,7 @@ class Localisation(QObject):
 
     def failed(self, op, error, context):
         if context.startswith('localisation:'):
+            self.checking = False
             self.pending = False
             self.notice = str(error)
             self.changed.emit()
@@ -129,6 +140,7 @@ class Localisation(QObject):
             self.changed.emit()
         else:
             self.was_connected = False
+            self.checking = self.checked = False
             self.timer.stop()
             self.available = False
             self.pending = False
@@ -139,7 +151,7 @@ class Localisation(QObject):
 
     @Slot()
     def barrier(self):
-        self.pending = False
+        self.pending = self.checking = False
         self.changed.emit()
 
     def shutdown(self):

@@ -12,12 +12,12 @@ ScrollView {
     width: root.availableWidth
     Flow {
         Layout.fillWidth: true; spacing: 6
-        Button { objectName: "localisationCheck"; text: "Проверить возможности"; enabled: backend.view.connected; onClicked: localisation.check() }
+        Button { objectName: "localisationCheck"; text: localisation.view.checking ? "Проверяю…" : "Проверить возможности"; enabled: backend.view.connected && !localisation.view.checking; onClicked: localisation.check() }
         Button { objectName: "localisationCamera"; text: "Камера + IMU"; enabled: localisation.view.available && controls.view.manual && !controls.view.pending; onClicked: localisation.startCamera() }
         Button { objectName: "localisationRefresh"; text: "Обновить"; enabled: localisation.view.available && !localisation.view.pending; onClicked: localisation.refresh() }
         CheckBox { text: "Обновлять 2 раза/с"; enabled: localisation.view.available; checked: localisation.view.watching; onToggled: localisation.watch(checked) }
     }
-    Label { text: localisation.view.notice; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { objectName: "localisationNotice"; text: localisation.view.notice; wrapMode: Text.Wrap; Layout.fillWidth: true }
     RowLayout {
         Label { text: "Старт X, м" }
         TextField { id: priorX; objectName: "localisationPriorX"; text: "0"; Layout.preferredWidth: 65; selectByMouse: true }

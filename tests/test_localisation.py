@@ -69,3 +69,20 @@ class LocalisationTests(unittest.TestCase):
         self.session.response.emit('system.capabilities',{},'localisation:capabilities')
         self.session.changed.emit()
         self.assertIn('не поддерживает',self.model.view['notice'])
+
+    def test_check_is_visible_bounded_and_unsupported_is_not_stopped(self):
+        self.model.check();self.model.check()
+        self.assertTrue(self.model.view['checking'])
+        self.assertEqual(len(self.session.requests),1)
+        self.assertIn('Проверяю',self.model.view['status'])
+        self.session.response.emit('system.capabilities',{},'localisation:capabilities')
+        self.assertFalse(self.model.view['checking'])
+        self.assertIn('Нужно обновить',self.model.view['status'])
+
+    def test_failed_check_can_be_retried(self):
+        self.model.check()
+        self.session.failed.emit('system.capabilities','timeout','localisation:capabilities')
+        self.assertFalse(self.model.view['checking'])
+        self.assertIn('timeout',self.model.view['notice'])
+        self.model.check()
+        self.assertEqual(len(self.session.requests),2)

@@ -319,6 +319,8 @@ def main():
             show("localisationDock")
             click("localisationCheck")
             assert not backend.localisation.available
+            assert 'Нужно обновить' in item('localisationStatus').property('text')
+            assert 'не поддерживает' in item('localisationNotice').property('text')
             assert not item("localisationStart").isEnabled()
             robot.localisation_enabled=True
             click("localisationCheck")
