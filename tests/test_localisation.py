@@ -95,3 +95,32 @@ class LocalisationTests(unittest.TestCase):
         self.assertIn('доступна', self.model.view['status'])
         self.assertIn('Камера + IMU', self.model.view['notice'])
         self.assertFalse(self.control.commands)
+
+    def test_capability_check_starts_bounded_status_updates(self):
+        self.session.response.emit('system.capabilities', {'localisation': {}}, 'localisation:capabilities')
+        self.assertTrue(self.model.view['watching'])
+        self.assertTrue(self.model.pending)
+        self.model.refresh()
+        self.assertEqual(len(self.session.requests), 1)
+        self.model.watch(False)
+        self.assertFalse(self.model.view['watching'])
+
+    def test_ambiguous_pose_is_not_reported_as_localised(self):
+        self.model.checked=self.model.available=True
+        self.result(result={'candidate':[1.,0.,0.], 'ambiguous':True})
+        self.assertIn('неоднозначно', self.model.view['status'])
+
+    def test_camera_start_waits_for_completion_without_more_retries(self):
+        from operator_gui.transport import Transport
+        from unittest.mock import patch
+        t=Transport(); failures=[]
+        t.failed.connect(lambda *args: failures.append(args))
+        t.pending[1]=dict(op='camera.start',context='',attempts=5,deadline=1.25,expires=20.)
+        with patch('operator_gui.transport.time.monotonic', return_value=2.):
+            t._tick()
+        self.assertFalse(failures)
+        self.assertEqual(t.pending[1]['attempts'],5)
+        with patch('operator_gui.transport.time.monotonic', return_value=21.):
+            t._tick()
+        self.assertEqual(len(failures),1)
+        self.assertFalse(t.pending)

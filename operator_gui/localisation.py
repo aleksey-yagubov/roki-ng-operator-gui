@@ -54,6 +54,8 @@ class Localisation(QObject):
                             'Локализация доступна — не запущена' if not self.state.get('running') else
                             'Ошибка' if self.state.get('error') else
                             'Нет свежей оценки' if not fresh or not sane else
+                            'Положение неоднозначно — сторона поля не определена' if result.get('ambiguous') else
+                            'Слабое совпадение разметки — положение не определено' if result.get('fit_state') == 'weak' else
                             'Диагностический кандидат — не подтверждённая позиция'))
 
     @Slot()
@@ -111,7 +113,7 @@ class Localisation(QObject):
             self.notice = ('Локализация доступна. Камера должна работать с синхронизацией IMU.'
                            if self.available else 'Установленный runtime не поддерживает локализацию.')
             if self.available:
-                self.refresh()
+                self.watch(True)
         elif context in ('localisation:status', 'localisation:action'):
             if op.startswith('localisation.'):
                 self.pending = False

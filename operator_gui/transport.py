@@ -194,7 +194,8 @@ class Transport(QObject):
             return
         now = time.monotonic()
         self.pending[self.ident] = dict(op=op, context=context, packet=packet, attempts=1,
-                                       sent=now, deadline=now + 0.25)
+                                       sent=now, deadline=now + 0.25,
+                                       expires=now + (20.0 if op == "camera.start" else 1.25))
         self._write(packet)
 
     def _write(self, packet):
@@ -216,6 +217,9 @@ class Transport(QObject):
             if pending["deadline"] > now:
                 continue
             if pending["attempts"] >= 5:
+                if now < pending["expires"]:
+                    pending["deadline"] = pending["expires"]
+                    continue
                 del self.pending[ident]
                 self.failed.emit(pending["op"], "Response timeout (operation outcome unknown)", pending["context"])
                 if self.phase == "connecting":

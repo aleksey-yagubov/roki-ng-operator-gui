@@ -19,6 +19,7 @@ from PySide6.QtTest import QTest
 
 from operator_gui.controller import Controller
 from roki_operator import create_engine
+from operator_gui.appearance import configure as configure_appearance
 from tests.fake_robot import FakeRobot
 from tests.test_operator import wait_until
 
@@ -33,6 +34,7 @@ def main():
     output = ROOT / "artifacts" / "operator-gui"
     output.mkdir(parents=True, exist_ok=True)
     app = QGuiApplication([sys.argv[0]])
+    configure_appearance(app)
     app.setOrganizationName("ROKI-test")
     app.setApplicationName("operator-test")
     robot = FakeRobot()
