@@ -22,6 +22,8 @@ ColumnLayout {
         }
     }
     Flow {
+        Layout.minimumWidth: 0
+        Layout.preferredWidth: 1
         Layout.fillWidth: true
         spacing: 4
         Button { objectName: "dataSnapshotButton"; text: "Снимок"; enabled: dataSources.view.connected && !!dataSources.view.selected && !dataSources.view.busy; onClicked: dataSources.snapshot() }

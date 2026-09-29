@@ -26,11 +26,12 @@ ApplicationWindow {
     visible: true
     width: 1200
     height: 800
-    minimumWidth: 800
-    minimumHeight: 700
+    // KDDW keeps the combined dock minima; smaller windows clip the right column.
+    minimumWidth: 1200
+    minimumHeight: 800
     title: "ROKI NG Operator"
     onClosing: Qt.quit()
-    property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, catalogDock, parametersDock, fieldDock, visionDock, dataDock, logsDock, diagnosticsDock]
+    property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, catalogDock, parametersDock, fieldDock, localisationDock, visionDock, dataDock, logsDock, diagnosticsDock]
     Loader {
         id: videoWindowLoader
         onStatusChanged: if (status === Loader.Error) video.media_error("Не удалось загрузить окно видео QML")
@@ -76,6 +77,7 @@ ApplicationWindow {
                     MenuItem { text: "Состояние"; onTriggered: showDock(statusDock) }
                     MenuItem { text: "Слоты и тесты"; onTriggered: showDock(catalogDock) }
                     MenuItem { text: "Параметры"; onTriggered: showDock(parametersDock) }
+                    MenuItem { text: "Локализация"; onTriggered: showDock(localisationDock) }
                     MenuItem { text: "Поле и ворота"; onTriggered: showDock(fieldDock) }
                     MenuItem { text: "Цвета и камера"; onTriggered: showDock(visionDock) }
                     MenuItem { text: "Источники данных"; onTriggered: showDock(dataDock) }
@@ -180,6 +182,13 @@ ApplicationWindow {
             FieldPanel { anchors.fill: parent; anchors.margins: 8 }
         }
         KDDW.DockWidget {
+            id: localisationDock
+            objectName: "localisationDock"
+            uniqueName: "localisation"
+            title: "Локализация"
+            LocalisationPanel { anchors.fill: parent; anchors.margins: 8 }
+        }
+        KDDW.DockWidget {
             id:visionDock
             objectName:"visionDock"
             uniqueName:"visionTuning"
@@ -217,6 +226,7 @@ ApplicationWindow {
             statusDock.addDockWidgetAsTab(catalogDock)
             statusDock.addDockWidgetAsTab(parametersDock)
             statusDock.addDockWidgetAsTab(fieldDock)
+            statusDock.addDockWidgetAsTab(localisationDock)
             statusDock.addDockWidgetAsTab(visionDock)
             statusDock.addDockWidgetAsTab(dataDock)
             statusDock.addDockWidgetAsTab(diagnosticsDock)

@@ -100,7 +100,7 @@ ScrollView {
                 Layout.fillWidth:true;spacing:6
                 Button {text:"Стандартный фильтр";enabled:!visionTuning.view.busy && profile.count>0;onClicked:visionTuning.defaults("lab")}
                 Button {text:"Сохранить фильтр";enabled:controls.view.owns && !controls.view.pending && !visionTuning.view.busy;onClicked:visionTuning.save("lab")}
-                Button {text:"Запустить детектор на роботе";enabled:controls.view.owns && !controls.view.pending && profile.count>0;onClicked:visionTuning.action("detection.start")}
+                Button {text:"Запустить детектор на роботе";enabled:controls.view.manual && !controls.view.pending && profile.count>0;onClicked:visionTuning.action("detection.start")}
                 Button {text:"Остановить детектор";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.action("detection.stop")}
             }
             Label {text:"Детектор робота (сохранённые параметры, свой номер кадра):";font.bold:true}

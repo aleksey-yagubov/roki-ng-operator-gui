@@ -29,6 +29,7 @@ def create_engine(controller):
     for name, value in {"backend": controller, "logsModel": controller.log_filter,
                         "controls": controller.control,
                         "fieldEditor": controller.field_editor,
+                        "localisation": controller.localisation,
                         "visionTuning":controller.vision_tuning,
                         "video": controller.video,
                         "dataSources": controller.data_sources, "dataFieldsModel": controller.data_sources.rows,

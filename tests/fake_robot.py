@@ -34,6 +34,9 @@ class FakeRobot:
         self.values = {}
         self.subscriptions = {}
         self.streams = {}
+        self.localisation_enabled = False
+        self.localisation_running = False
+        self.localisation_age = 10
         self.thread.start()
 
     def close(self):
@@ -112,7 +115,25 @@ class FakeRobot:
             return dict(state=self.mode, owner=self.owner, boot_id="fake-boot", counters={},
                         workers={"motherboard": {"alive": True, "state": "ready"}})
         if op == "system.capabilities":
-            return dict(revision="manual-1", simulated=True, future=["video", "osd"])
+            return dict(revision="manual-1", simulated=True, future=["video", "osd"],
+                        **({"localisation":{"mode":"diagnostic_only"}} if self.localisation_enabled else {}))
+        if op.startswith('localisation.'):
+            assert self.localisation_enabled
+            if op=='localisation.start':
+                assert self.owner==self.session and self.mode=='MANUAL'
+                assert body['lease_epoch']==self.lease
+                assert len(body['prior'])==3
+                self.localisation_running=True
+            elif op=='localisation.stop':
+                assert body['lease_epoch']==self.lease
+                self.localisation_running=False
+            return dict(state='ready',running=self.localisation_running,mode='diagnostic_only',
+                        age_ms=self.localisation_age,error=None,configuration_id='a'*16,
+                        geometry=dict(length=3.35,width=2.35,carpet_length=4.,carpet_width=3.,
+                                      paint_width=.05,circle_diameter=.5),
+                        result=dict(candidate=[-1.2,-.8,.4],valid=False,fit_state='weak',
+                                    lines=5,circle=True,inlier_fraction=.4,median_residual_m=.15,
+                                    frame_sequence=123) if self.localisation_running else None)
         if op == "video.capabilities":
             return dict(backends=["direct-gst"], codecs=["h264", "jpeg"])
         if op == "video.create":

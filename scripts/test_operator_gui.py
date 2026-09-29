@@ -153,14 +153,14 @@ def main():
             click("dataUnsubscribeButton")
             wait_until(lambda: not backend.data_sources.wanted)
             assert robot.owner is None and robot.mode == "GAME"
-            window.resize(800, 700)
+            window.resize(max(800, window.minimumWidth()), max(700, window.minimumHeight()))
             settle()
             for name in ("dataListButton", "dataSnapshotButton", "dataSubscribeButton", "dataUnsubscribeButton", "dataFields", "dataRawDetails"):
                 obj = item(name)
                 edge = obj.mapToScene(QPointF(obj.width(), obj.height()))
                 origin = obj.mapToScene(QPointF(0, 0))
-                assert origin.x() >= 0 and origin.y() >= 0 and edge.x() <= window.width() and edge.y() <= item("logsList").mapToScene(QPointF(0, 0)).y(), f"Clipped {name}: {edge}"
-            snapshot("06-data-small")
+                assert origin.x() >= 0 and origin.y() >= 0 and edge.x() <= window.width() and edge.y() <= item("logsList").mapToScene(QPointF(0, 0)).y(), f"Clipped {name}: {edge}; window={window.width()}x{window.height()}, logs_y={item('logsList').mapToScene(QPointF(0,0)).y()}"
+            snapshot("06-data-minimum-window")
             window.resize(1200, 800)
             settle()
             show("parametersDock")
@@ -222,19 +222,19 @@ def main():
             settle(300)
             assert dock.property("isOpen")
             snapshot("09-restored")
-            window.resize(800, 700)
+            window.resize(max(800, window.minimumWidth()), max(700, window.minimumHeight()))
             settle(300)
             show("connectionDock")
             click("disconnectButton")
             wait_until(lambda: not backend.transport.connected)
             snapshot("10-small")
-            assert window.minimumWidth() == 800 and window.minimumHeight() == 700
+            assert window.minimumWidth() == 1200 and window.minimumHeight() == 800
             window.resize(window.minimumWidth(), window.minimumHeight())
             settle(300)
             for name in ("robotHost", "parametersList", "logsList"):
                 obj = item(name)
                 edge = obj.mapToScene(QPointF(obj.width(), obj.height()))
-                assert edge.x() <= window.width() and edge.y() <= window.height(), f"Clipped {name}: {edge}"
+                assert edge.x() <= window.width() and edge.y() <= window.height(), f"Clipped {name}: {edge}; window={window.width()}x{window.height()}, logs_y={item('logsList').mapToScene(QPointF(0,0)).y()}"
             snapshot("11-minimum")
             assert robot.game_running
             assert not any(m["op"] in ("control.acquire", "mode.set", "video.start", "test.start", "motion.pose") for m in robot.requests)
@@ -289,6 +289,34 @@ def main():
             click("saveParameterButton")
             wait_until(lambda: robot.values.get("head.field_tilt") == -1200)
             snapshot("13-parameter-editor")
+            # Existing Qt click harness exercises the actual QML panel and UDP path.
+            show("localisationDock")
+            click("localisationCheck")
+            assert not backend.localisation.available
+            assert not item("localisationStart").isEnabled()
+            robot.localisation_enabled=True
+            click("localisationCheck")
+            wait_until(lambda: backend.localisation.available and not backend.localisation.pending)
+            item("localisationPriorX").setProperty("text","-1.2")
+            item("localisationPriorY").setProperty("text","-0.8")
+            item("localisationPriorYaw").setProperty("text","90")
+            click("localisationStart")
+            wait_until(lambda: backend.localisation.view['running'] and not backend.control.pending)
+            assert len(backend.localisation.view['pose'])==3
+            command=next(m for m in reversed(robot.requests) if m['op']=='localisation.start')
+            assert abs(command['body']['prior'][2]-1.57079632679)<1e-8
+            assert not item("localisationStart").isEnabled()
+            snapshot("13a-localisation-candidate")
+            robot.localisation_age=1800
+            click("localisationRefresh")
+            wait_until(lambda: not backend.localisation.pending)
+            assert backend.localisation.view['pose']==[]
+            assert 'свежей' in item("localisationStatus").property('text')
+            snapshot("13b-localisation-stale")
+            click("localisationStop")
+            wait_until(lambda: not backend.localisation.view['running'] and not backend.control.pending)
+            assert backend.localisation.view['pose']==[]
+
             show("catalogDock")
             click("catalogButton")
             wait_until(lambda: len(backend.test_schemas) == 4)

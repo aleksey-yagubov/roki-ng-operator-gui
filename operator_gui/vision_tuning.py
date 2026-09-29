@@ -164,7 +164,9 @@ class VisionTuning(QObject):
     def action(self,op):
         if op not in ('camera.start','camera.stop','detection.start','detection.stop'):return
         args={'with_imu':False} if op=='camera.start' else {'profile':self.profile} if op=='detection.start' else {}
-        self.control.command(op,args,job=False,context='tuning:action')
+        sent=self.control.command(op,args,manual=op.endswith('.start'),job=False,context='tuning:action')
+        if not sent:
+            self.notice=self.control.error;self.changed.emit()
 
     @Slot()
     def snapshot(self):

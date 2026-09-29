@@ -14,6 +14,7 @@ from .data_sources import DataSources
 from .video import Video
 from .field_editor import FieldEditor
 from .vision_tuning import VisionTuning
+from .localisation import Localisation
 
 
 def pretty(value):
@@ -37,6 +38,8 @@ class Controller(QObject):
         self.transport.notification.connect(self._notification)
         self.transport.diagnostic.connect(self._log)
         self.control = Control(self.transport, self._log, self)
+        self.localisation = Localisation(self.transport,self.control,self)
+        self.control.barrierIssued.connect(self.localisation.barrier)
         self.field_editor = FieldEditor(self.transport,self.control,self)
         self.control.barrierIssued.connect(self._barrier)
         self.data_sources = DataSources(self.transport, self)
@@ -365,6 +368,7 @@ class Controller(QObject):
         self._log("INFO", message)
 
     def shutdown(self):
+        self.localisation.shutdown()
         self.video.shutdown()
         self.data_sources.shutdown()
         self.control.shutdown()
