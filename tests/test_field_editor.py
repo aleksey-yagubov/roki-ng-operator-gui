@@ -61,3 +61,17 @@ class FieldTests(unittest.TestCase):
         self.editor.place(1,2)
         self.editor.failed('params.set',{'message':'disk full'},'field:save:field.mark.00')
         assert self.editor.drafts and 'disk full' in self.editor.notice
+
+    def test_own_colour_uses_saved_goal_id_without_rotating_map(self):
+        self.editor.values.update({'match.own_goal':0,'field.goal.0':{'colour':'yellow'},'field.goal.1':{'colour':'blue'}})
+        self.editor.ownColour('blue')
+        args,kw=self.control.commands[-1]
+        self.assertEqual(args[1],{'key':'match.own_goal','value':1,'expected_value':0})
+        self.editor.response('params.set',args[1],kw['context'])
+        self.assertEqual(self.editor.view['ownColour'],'blue')
+        self.assertEqual(self.editor.values['field.goal.0']['colour'],'yellow')
+
+    def test_own_colour_rejects_ambiguous_map(self):
+        self.editor.values.update({'match.own_goal':0,'field.goal.0':{'colour':'blue'},'field.goal.1':{'colour':'blue'}})
+        self.editor.ownColour('blue')
+        self.assertFalse(self.control.commands)

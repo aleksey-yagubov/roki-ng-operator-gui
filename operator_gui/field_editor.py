@@ -21,7 +21,11 @@ class FieldEditor(QObject):
 
     @Property('QVariantMap',notify=changed)
     def view(self):
-        return dict(values=self.values|self.drafts,selected=self.selected,
+        own=self.values.get('match.own_goal')
+        colours=[self.values.get(f'field.goal.{i}',{}).get('colour','unknown') for i in range(2)]
+        return dict(ownColour=colours[own] if own in (0,1) else '',
+                    ownColourReady=set(colours)=={'yellow','blue'} and not self.drafts and not self.busy,
+                    values=self.values|self.drafts,selected=self.selected,
                     meta=self.metas.get(self.selected,{}),
                     draft=self.drafts.get(self.selected,self.values.get(self.selected,{})),
                     dirty=self.selected in self.drafts,notice=self.notice,busy=self.busy,
@@ -110,6 +114,15 @@ class FieldEditor(QObject):
         self.control.command('params.set',{'key':'match.own_goal','value':index,
             'expected_value':self.values['match.own_goal']},
             manual=False,job=False,context='field:save:match.own_goal')
+
+    @Slot(str)
+    def ownColour(self,colour):
+        if not self.view['ownColourReady']:
+            self.notice='Сначала сохраните карту с одними жёлтыми и одними синими воротами.'
+            self.changed.emit();return
+        for index in (0,1):
+            if self.values[f'field.goal.{index}']['colour']==colour:
+                self.ownGoal(index);return
 
     @Slot(float,float)
     def place(self,x,y):

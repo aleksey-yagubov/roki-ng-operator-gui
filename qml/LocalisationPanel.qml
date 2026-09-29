@@ -74,13 +74,13 @@ ScrollView {
             let v=localisation.view, r=v.result, p=v.pose
             let pose=p.length===3 ? "X "+p[0].toFixed(2)+" м; Y "+p[1].toFixed(2)+" м; yaw "+(p[2]*180/Math.PI).toFixed(1)+"°\n" : ""
             return pose+"Возраст: "+(v.ageMs ?? "—")+" мс; кадр: "+(r.frame_sequence ?? "—")+
-                "; отрезков: "+(r.lines ?? "—")+"; круг: "+(r.circle ? "да" : "нет")+
+                "; отрезков: "+(r.lines ?? "—")+"; круг: "+(r.circle ? "да" : "нет")+"; пар ворот: "+(r.goal_pairs ?? 0)+
                 "\nСовпадение: "+({matched:"согласовано",weak:"слабое",ambiguous:"неоднозначно"}[r.fit_state] || "нет оценки")+
                 "; доля совпавших: "+(r.inlier_fraction===undefined ? "—" : (100*r.inlier_fraction).toFixed(0)+"%")+
                 "; остаток: "+(r.median_residual_m===undefined ? "—" : r.median_residual_m.toFixed(3)+" м")+
                 "\nКарта запуска: "+(v.configurationId || "—")+". Изменения редактора требуют перезапуска локализации."
         }
     }
-    Label { text: "Размер круга и высота камеры требуют проверки. Ворота пока выдаются как цветные кандидаты; они не определяют сторону поля в фильтре."; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    Label { text: "Свои ворота выберите по цвету в «Поле и ворота». Пара цветных стоек помогает определить сторону; при неоднозначности позиция скрыта. После перестановки робота перезапустите локализацию с новой позой. Размер круга и высота камеры требуют проверки."; Layout.fillWidth: true; wrapMode: Text.Wrap }
 }
 }

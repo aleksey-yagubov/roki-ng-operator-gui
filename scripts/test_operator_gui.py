@@ -291,6 +291,18 @@ def main():
             click("saveParameterButton")
             wait_until(lambda: robot.values.get("head.field_tilt") == -1200)
             snapshot("13-parameter-editor")
+            show("fieldDock")
+            backend.field_editor.values.update({'match.own_goal':0,
+                'field.goal.0':{'colour':'yellow','x':-1.675,'y':0,'width':1.},
+                'field.goal.1':{'colour':'blue','x':1.675,'y':0,'width':1.}})
+            backend.field_editor.changed.emit();settle()
+            click("ownBlueGoal")
+            wait_until(lambda: backend.field_editor.view['ownColour']=='blue' and not backend.control.pending)
+            assert robot.values['match.own_goal']==1
+            click("ownYellowGoal")
+            wait_until(lambda: backend.field_editor.view['ownColour']=='yellow' and not backend.control.pending)
+            assert robot.values['match.own_goal']==0
+            snapshot("13e-own-goal-colour")
             show("visionDock")
             tuning=backend.vision_tuning
             tuning.profile='green_field';tuning.profiles=['green_field']

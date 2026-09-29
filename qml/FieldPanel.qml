@@ -94,8 +94,8 @@ ColumnLayout {
                 Button { text:"Сохранить выбранный объект";enabled:fieldEditor.view.dirty && controls.view.owns && !controls.view.pending;onClicked:fieldEditor.save() }
                 RowLayout {
                     Label { text:"Свои ворота:" }
-                    Button { text:"0";enabled:controls.view.owns && !controls.view.pending;onClicked:fieldEditor.ownGoal(0) }
-                    Button { text:"1";enabled:controls.view.owns && !controls.view.pending;onClicked:fieldEditor.ownGoal(1) }
+                    Button { objectName:"ownYellowGoal"; text:"Жёлтые"; checkable:true; checked:fieldEditor.view.ownColour==="yellow"; enabled:controls.view.owns && !controls.view.pending && fieldEditor.view.ownColourReady; onClicked:fieldEditor.ownColour("yellow") }
+                    Button { objectName:"ownBlueGoal"; text:"Синие"; checkable:true; checked:fieldEditor.view.ownColour==="blue"; enabled:controls.view.owns && !controls.view.pending && fieldEditor.view.ownColourReady; onClicked:fieldEditor.ownColour("blue") }
                 }
             }
         }

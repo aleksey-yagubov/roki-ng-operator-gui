@@ -44,7 +44,7 @@ class Localisation(QObject):
         return dict(available=self.available, pending=self.pending, checking=self.checking, checked=self.checked,
                     running=self.state.get('running', False), watching=self.timer.isActive(),
                     notice=self.notice, error=self.state.get('error') or '',
-                    pose=pose if sane and fresh else [], ageMs=age,
+                    pose=pose if sane and fresh and not result.get('ambiguous') and result.get('fit_state') not in ('weak','rejected') else [], ageMs=age,
                     fresh=fresh, result=result, geometry=self.state.get('geometry') or {},
                     configurationId=self.state.get('configuration_id') or '',
                     status=('Нет связи' if not self.session.connected else
@@ -53,6 +53,7 @@ class Localisation(QObject):
                             'Проверьте возможности робота' if not self.checked else
                             'Локализация доступна — не запущена' if not self.state.get('running') else
                             'Ошибка' if self.state.get('error') else
+                            'Отклонён невозможный скачок позиции' if result.get('reason') == 'motion_discontinuity' else
                             'Нет свежей оценки' if not fresh or not sane else
                             'Положение неоднозначно — сторона поля не определена' if result.get('ambiguous') else
                             'Слабое совпадение разметки — положение не определено' if result.get('fit_state') == 'weak' else

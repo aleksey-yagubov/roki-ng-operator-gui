@@ -124,3 +124,8 @@ class LocalisationTests(unittest.TestCase):
             t._tick()
         self.assertEqual(len(failures),1)
         self.assertFalse(t.pending)
+
+    def test_unresolved_or_rejected_pose_never_jumps_on_map(self):
+        for state in ({'ambiguous':True}, {'fit_state':'weak'}, {'fit_state':'rejected','reason':'motion_discontinuity'}):
+            self.result(result={'candidate':[1.,1.,3.], **state})
+            self.assertEqual(self.model.view['pose'],[])
