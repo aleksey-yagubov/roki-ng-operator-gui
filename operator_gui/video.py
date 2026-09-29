@@ -17,10 +17,10 @@ def video_request(values):
     if codec not in ("h264", "jpeg"):
         raise ValueError("Неизвестный кодек")
     backend=values.get('backend','direct-gst')
-    if backend not in ('direct-gst','runtime'):raise ValueError('Неизвестный источник видео')
-    sw,sh=(1600,1300) if backend=='runtime' else (integer("sensorWidth",320,4096),integer("sensorHeight",240,4096))
+    if backend not in ('direct-gst','runtime','localisation'):raise ValueError('Неизвестный источник видео')
+    sw,sh=(1600,1300) if backend in ('runtime','localisation') else (integer("sensorWidth",320,4096),integer("sensorHeight",240,4096))
     width, height = integer("width", 160, 1600), integer("height", 120, 1300)
-    depth = 10 if backend=='runtime' else integer("depth",8,10)
+    depth = 10 if backend in ('runtime','localisation') else integer("depth",8,10)
     if depth not in (8, 10) or width > sw or height > sh or width % 2 or height % 2:
         raise ValueError("RAW8/RAW10; выход должен быть чётным и не больше сенсора")
     if codec == "jpeg" and (width % 8 or height % 8):
@@ -28,7 +28,7 @@ def video_request(values):
     encoding = {"name": codec}
     if codec == "h264":
         encoding["bitrate"] = integer("bitrate", 100000, 20000000)
-    if backend=='runtime' and (width>800 or height>650):raise ValueError('Runtime: максимум 800×650')
+    if backend in ('runtime','localisation') and (width>800 or height>650):raise ValueError('Runtime: максимум 800×650')
     result=dict(backend=backend,
                 output=dict(width=width, height=height, fps=scalar({"type": "float", "min": 1, "max": 120}, values["fps"])),
                 codec=encoding, destination=dict(rtp_port=integer("port", 1024, 65535)), mtu=1400)
@@ -120,6 +120,10 @@ class Video(QObject):
             return "Перед изменением настроек остановите текущий поток."
         return ""
 
+    @Property(bool, notify=imageChanged)
+    def hasImage(self):
+        return not self.image.isNull()
+
     @Property(int, notify=imageChanged)
     def imageSerial(self):
         return self.image_serial
@@ -162,6 +166,11 @@ class Video(QObject):
             self.request("video.create", dict(spec, lease_epoch=self.control.lease))
         except Exception as exc:
             self.local_error(str(exc))
+
+    @Slot()
+    def startLocalisation(self):
+        self.start(dict(backend='localisation',width=800,height=650,fps=30,
+                        codec='h264',bitrate=2000000,port=5004,decoder='avdec_h264',sink='image'))
 
     @Slot(QObject)
     def attach(self, item):

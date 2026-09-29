@@ -10,8 +10,8 @@ ScrollView {
     ColumnLayout {
         width: scroll.availableWidth
         Label { text: "Источник видео"; font.bold: true; Layout.fillWidth: true; wrapMode: Text.Wrap }
-        ComboBox { id: sourceBackend; model:["direct-gst","runtime"]; enabled:video.view.canEditSettings; Layout.fillWidth:true }
-        Label { text:sourceBackend.currentText === "runtime" ? "Сначала запустите runtime-камеру в панели «Цвета и камера». Этот поток показывает её кадры." : "Direct-gst — ручное видео; параметры runtime-камеры к нему не применяются."; wrapMode:Text.Wrap; Layout.fillWidth:true }
+        ComboBox { id: sourceBackend; model:["direct-gst","runtime","localisation"]; enabled:video.view.canEditSettings; Layout.fillWidth:true }
+        Label { text:sourceBackend.currentText === "localisation" ? "Обработанные кадры локализатора; сначала запустите локализацию." : sourceBackend.currentText === "runtime" ? "Сначала запустите runtime-камеру в панели «Цвета и камера». Этот поток показывает её кадры." : "Direct-gst — ручное видео; параметры runtime-камеры к нему не применяются."; wrapMode:Text.Wrap; Layout.fillWidth:true }
         Label { text: "Нужны управление и MANUAL. Видео запускается только кнопкой. IMU не включается."; Layout.fillWidth: true; wrapMode: Text.Wrap }
         Button { objectName: "videoCapabilitiesButton"; text: "Запросить возможности"; enabled: backend.view.connected && !video.view.pending; onClicked: video.getCapabilities() }
         Label { objectName: "videoCapabilitiesSummary"; text: video.view.capabilitiesSummary; Layout.fillWidth: true; wrapMode: Text.Wrap }

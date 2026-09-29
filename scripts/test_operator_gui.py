@@ -21,6 +21,8 @@ from operator_gui.controller import Controller
 from roki_operator import create_engine
 from operator_gui.appearance import configure as configure_appearance
 from tests.fake_robot import FakeRobot
+from tests.test_video import ReceiverStub
+from unittest.mock import patch
 from tests.test_operator import wait_until
 
 
@@ -38,7 +40,8 @@ def main():
     app.setOrganizationName("ROKI-test")
     app.setApplicationName("operator-test")
     robot = FakeRobot()
-    backend = Controller("127.0.0.1", robot.port, output)
+    with patch("operator_gui.video.Receiver", ReceiverStub):
+        backend = Controller("127.0.0.1", robot.port, output)
     backend.control.install_keyboard(app)
     engine = create_engine(backend)
     warnings = []
@@ -344,11 +347,24 @@ def main():
             item("localisationPriorYaw").setProperty("text","90")
             click("localisationStart")
             wait_until(lambda: backend.localisation.view['running'] and not backend.control.pending)
-            assert len(backend.localisation.view['pose'])==3
+            assert backend.localisation.view['pose']==[], 'Weak geometry must not show a position'
+            assert 'Линии плохо' in backend.localisation.view['problems']
+            robot.localisation_fit='matched'
+            wait_until(lambda: len(backend.localisation.view['pose'])==3)
             command=next(m for m in reversed(robot.requests) if m['op']=='localisation.start')
             assert abs(command['body']['prior'][2]-1.57079632679)<1e-8
             assert not item("localisationStart").isEnabled()
             snapshot("13a-localisation-candidate")
+            click("localisationVideoStart")
+            wait_until(lambda: backend.video.phase=='running')
+            assert backend.video.backend=='localisation'
+            assert item("localisationProcessedVideo").isVisible()
+            image=QImage(800,650,QImage.Format.Format_RGB32);image.fill(0xff208030)
+            backend.video.receiver.imageReady.emit(image);settle()
+            assert not backend.video.image.isNull()
+            snapshot("13f-localisation-processed-video")
+            click("localisationVideoStop")
+            wait_until(lambda: not backend.video.info and not backend.video.pending)
             robot.localisation_age=1800
             click("localisationRefresh")
             wait_until(lambda: not backend.localisation.pending)

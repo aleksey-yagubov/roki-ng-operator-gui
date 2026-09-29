@@ -131,7 +131,7 @@ class FakeRobot:
                         age_ms=self.localisation_age,error=None,configuration_id='a'*16,
                         geometry=dict(length=3.35,width=2.35,carpet_length=4.,carpet_width=3.,
                                       paint_width=.05,circle_diameter=.5),
-                        result=dict(candidate=[-1.2,-.8,.4],valid=False,fit_state='weak',
+                        result=dict(candidate=[-1.2,-.8,.4],valid=False,fit_state=getattr(self,'localisation_fit','weak'),
                                     lines=5,circle=True,inlier_fraction=.4,median_residual_m=.15,
                                     frame_sequence=123) if self.localisation_running else None)
         if op == "video.capabilities":

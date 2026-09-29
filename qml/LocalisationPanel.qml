@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 ScrollView {
     id: root
+    property alias videoItem: processedVideo
     clip: true
     contentWidth: availableWidth
     property var kddockwidgets_min_size: Qt.size(580, 320)
@@ -37,6 +38,23 @@ ScrollView {
     }
     Label { objectName: "localisationStatus"; text: localisation.view.status; font.bold: true; Layout.fillWidth: true; wrapMode: Text.Wrap }
     Label { text: localisation.view.error; visible: text.length > 0; color: "#b03030"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    Flow {
+        Layout.fillWidth:true; spacing:6
+        Button { objectName:"localisationVideoStart"; text:"Видео с разметкой"; enabled:localisation.view.running && video.view.canStart; onClicked:video.startLocalisation() }
+        Button { objectName:"localisationVideoStop"; text:"Остановить видео"; enabled:video.view.backend==="localisation" && video.view.canStop; onClicked:video.stop() }
+    }
+    Label { text:video.view.startBlockedReason; visible:!video.view.canStart && video.view.backend!=="localisation"; wrapMode:Text.Wrap; Layout.fillWidth:true }
+    Image {
+        id:processedVideo
+        objectName:"localisationProcessedVideo"
+        Layout.fillWidth:true; Layout.preferredHeight:visible ? Math.max(320,width*650/800) : 0
+        visible:video.view.backend==="localisation" && video.view.streamId!==""
+        fillMode:Image.PreserveAspectFit; cache:false
+        source:visible && video.hasImage ? "image://mainVideo/frame?"+video.imageSerial : ""
+    }
+    Label { visible:video.view.backend==="localisation"; text:video.view.error || (video.view.stalled ? "Нет новых обработанных кадров: изображение остановилось." : "Поток кадров локализатора. Частота зависит от времени обработки."); wrapMode:Text.Wrap; Layout.fillWidth:true }
+    Label { text:"Разметка нанесена на роботе: рамки — кандидаты стоек, фиолетовый — круг, зелёные отрезки — остаток < 10 см, оранжевые — больше, серые — без оценки. Зелёный цвет не подтверждает правильность всей позы. Номер кадра и причина оценки указаны на самом видео."; wrapMode:Text.Wrap; Layout.fillWidth:true }
+    Label { objectName:"localisationProblems"; text:localisation.view.problems; visible:text.length>0; wrapMode:Text.Wrap; Layout.fillWidth:true }
     Canvas {
         id: map
         objectName: "localisationMap"

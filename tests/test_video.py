@@ -61,6 +61,18 @@ class VideoTests(unittest.TestCase):
         video.item = Item()
         return video
 
+
+    def test_localisation_video_uses_stream_worker_source(self):
+        video=self.manual()
+        video.startLocalisation()
+        wait_until(lambda: video.phase=='running')
+        request=next(m for m in self.robot.requests if m['op']=='video.create')
+        self.assertEqual(request['body']['backend'],'localisation')
+        self.assertNotIn('sensor',request['body'])
+        self.assertEqual(request['body']['output']['width'],800)
+        video.stop()
+        wait_until(lambda: not video.info and not video.pending)
+
     def test_explicit_start_receiver_before_remote_and_stop_without_lease(self):
         self.connect()
         video = self.controller.video

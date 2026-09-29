@@ -39,6 +39,11 @@ ApplicationWindow {
     Connections {
         target: video
         function onShowWindow() {
+            if (video.view.backend === "localisation") {
+                showDock(localisationDock)
+                video.attach(localisationPanel.videoItem)
+                return
+            }
             if (video.view.sink === "image") {
                 if (videoWindowLoader.item) videoWindowLoader.item.hide()
                 showDock(imageDock)
@@ -186,7 +191,7 @@ ApplicationWindow {
             objectName: "localisationDock"
             uniqueName: "localisation"
             title: "Локализация"
-            LocalisationPanel { anchors.fill: parent; anchors.margins: 8 }
+            LocalisationPanel { id:localisationPanel; anchors.fill: parent; anchors.margins: 8 }
         }
         KDDW.DockWidget {
             id:visionDock
