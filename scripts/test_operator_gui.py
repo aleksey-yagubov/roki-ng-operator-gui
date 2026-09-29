@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import QEventLoop, QMetaObject, QObject, QPointF, QTimer, Qt, QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtQml import QQmlExpression
 from PySide6.QtTest import QTest
@@ -289,6 +289,32 @@ def main():
             click("saveParameterButton")
             wait_until(lambda: robot.values.get("head.field_tilt") == -1200)
             snapshot("13-parameter-editor")
+            show("visionDock")
+            tuning=backend.vision_tuning
+            tuning.profile='green_field';tuning.profiles=['green_field']
+            for axis,low,high in [('l',0,100),('a',-128,127),('b',-128,127)]:
+                for suffix,value in [('min',low),('max',high)]:
+                    key=f'vision.green_field.{axis}_{suffix}'
+                    tuning.metas[key]={'type':'int','min':low,'max':high,'default':value}
+                    tuning.values[key]=value
+            frame=QImage(800,650,QImage.Format.Format_RGB888);frame.fill(0xff208030)
+            backend.video.image=frame;backend.video.last_image_at=time.monotonic();backend.video.image_serial+=1
+            tuning.catalogChanged.emit();tuning.changed.emit();settle()
+            click('tuningLive')
+            wait_until(lambda: tuning.view['live'] and not tuning.source.isNull())
+            previous=tuning.serial
+            backend.video.image_serial+=1;backend.video.last_image_at=time.monotonic()
+            wait_until(lambda: tuning.serial>previous)
+            snapshot('13c-live-lab-preview')
+            click('tuningSnapshot')
+            assert not tuning.view['live']
+            previous=tuning.serial
+            backend.video.image_serial+=1;settle(300)
+            assert tuning.serial==previous
+            click('tuningLive')
+            backend.video.last_image_at=time.monotonic()-4
+            wait_until(lambda: tuning.source.isNull())
+            snapshot('13d-live-lab-stale')
             # Existing Qt click harness exercises the actual QML panel and UDP path.
             show("localisationDock")
             click("localisationCheck")

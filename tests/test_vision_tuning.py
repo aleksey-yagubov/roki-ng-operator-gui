@@ -80,3 +80,34 @@ class TuningTests(unittest.TestCase):
         self.model.queue=[]
         self.model.response('params.get',{'values':{keys[0]:15}},'tuning:load')
         assert self.model.values[keys[0]]==15
+
+    def tearDown(self):
+        self.model.shutdown()
+
+    def test_live_preview_consumes_each_frame_once_without_robot_requests(self):
+        self.model.live(True)
+        first=self.model.serial
+        self.model.preview_tick()
+        assert self.model.serial==first
+        self.video.image_serial+=1
+        self.model.preview_tick()
+        assert self.model.serial>first and self.model.view['live']
+        assert not self.session.requests and not self.control.commands
+
+    def test_live_preview_hides_stale_image_and_recovers(self):
+        self.model.live(True)
+        self.video.last_image_at-=4;self.model.preview_tick()
+        assert self.model.source.isNull() and self.model.lab is None
+        self.video.last_image_at=time.monotonic();self.video.image_serial+=1
+        self.model.preview_tick()
+        assert not self.model.source.isNull()
+
+    def test_snapshot_and_pipette_freeze_live(self):
+        self.model.live(True);self.model.snapshot()
+        assert not self.model.view['live']
+        self.model.live(True);self.model.pick(.5,.5,8)
+        assert not self.model.view['live'] and self.model.drafts
+
+    def test_disconnect_stops_live_preview(self):
+        self.model.live(True);self.session.connected=False;self.model.connection()
+        assert not self.model.view['live'] and self.model.source.isNull()

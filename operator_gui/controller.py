@@ -368,6 +368,7 @@ class Controller(QObject):
         self._log("INFO", message)
 
     def shutdown(self):
+        self.vision_tuning.shutdown()
         self.localisation.shutdown()
         self.video.shutdown()
         self.data_sources.shutdown()

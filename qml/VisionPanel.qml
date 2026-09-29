@@ -10,8 +10,8 @@ ScrollView {
     property var names:({orange_ball:"Оранжевый мяч",green_field:"Зелёное поле",white_marking:"Белая разметка",blue_posts:"Синие стойки",yellow_posts:"Жёлтые стойки",white_posts:"Белые стойки"})
     property var labels:({l_min:"L минимум",l_max:"L максимум",a_min:"a минимум",a_max:"a максимум",b_min:"b минимум",b_max:"b максимум",pixels_min:"Минимум пикселей",box_area_min:"Минимум площади рамки",
         "camera.exposure_us":"Выдержка, мкс","camera.analogue_gain":"Аналоговое усиление","camera.ae_enabled":"Автоэкспозиция","camera.awb_enabled":"Автобаланс белого","camera.white_balance.red_gain":"Красный gain","camera.white_balance.blue_gain":"Синий gain"})
-    onVisibleChanged:visionTuning.watch(visible && watching.checked)
-    Component.onDestruction:visionTuning.watch(false)
+    onVisibleChanged: { visionTuning.watch(visible && watching.checked); if (!visible) visionTuning.live(false) }
+    Component.onDestruction: { visionTuning.watch(false); visionTuning.live(false) }
     ColumnLayout {
         width:root.availableWidth
         Flow {
@@ -43,7 +43,8 @@ ScrollView {
             }
             RowLayout {
                 Layout.fillWidth:true
-                Button {text:"Взять кадр для настройки";onClicked:visionTuning.snapshot()}
+                Button {objectName:"tuningSnapshot";text:"Зафиксировать кадр";onClicked:visionTuning.snapshot()}
+                CheckBox {objectName:"tuningLive";text:"Live 5 Гц";checked:visionTuning.view.live;onToggled:visionTuning.live(checked)}
                 Label {text:"Допуск пипетки"}
                 SpinBox {id:tolerance;from:0;to:30;value:8;editable:true}
             }
@@ -53,11 +54,12 @@ ScrollView {
                 Image {
                     id:previewSource
                     objectName:"tuningSource"
-                    Layout.fillWidth:true;Layout.preferredHeight:230
+                    Layout.fillWidth:true;Layout.preferredHeight:320
                     fillMode:Image.PreserveAspectFit;cache:false
                     source:visionTuning.view.hasImage ? "image://tuning/source/"+visionTuning.view.serial : ""
                     MouseArea {
                         anchors.fill:parent
+                        onPressed:visionTuning.live(false)
                         onClicked:mouse => {
                             let u=(mouse.x-(previewSource.width-previewSource.paintedWidth)/2)/previewSource.paintedWidth
                             let v=(mouse.y-(previewSource.height-previewSource.paintedHeight)/2)/previewSource.paintedHeight
@@ -67,12 +69,12 @@ ScrollView {
                 }
                 Image {
                     objectName:"tuningMask"
-                    Layout.fillWidth:true;Layout.preferredHeight:230
+                    Layout.fillWidth:true;Layout.preferredHeight:320
                     fillMode:Image.PreserveAspectFit;cache:false
                     source:visionTuning.view.hasImage ? "image://tuning/mask/"+visionTuning.view.serial : ""
                 }
             }
-            Label {text:"Слева — снимок (клик: пипетка), справа — локальная LAB-маска. Выбрано пикселей: "+visionTuning.view.pixels+". Маска на декодированном кадре — приблизительный preview, не результат детектора робота.";Layout.fillWidth:true;wrapMode:Text.Wrap}
+            Label {text:"Слева — кадр (нажатие фиксирует кадр для пипетки), справа — локальная LAB-маска. Выбрано пикселей: "+visionTuning.view.pixels+". Маска на декодированном кадре — приблизительный preview, не результат детектора робота.";Layout.fillWidth:true;wrapMode:Text.Wrap}
             Repeater {
                 model:visionTuning.labKeys
                 RowLayout {

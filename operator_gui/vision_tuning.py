@@ -1,4 +1,4 @@
-"""Colour/camera tuning over params.*, explicit capture, frozen local preview."""
+"""Colour/camera tuning over params.*, explicit capture, bounded live local preview."""
 import time
 
 from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer,Qt
@@ -27,6 +27,8 @@ class VisionTuning(QObject):
         self.camera={};self.detector={};self.source=QImage();self.overlay=QImage()
         self.lab=self.rgb=None;self.serial=0;self.selected_pixels=0;self.source_label='Нет снимка'
         self.timer=QTimer(self);self.timer.setInterval(1000);self.timer.timeout.connect(self.status)
+        self.preview_timer=QTimer(self);self.preview_timer.setInterval(200);self.preview_timer.timeout.connect(self.preview_tick)
+        self.preview_frame=None
         session.response.connect(self.response);session.failed.connect(self.failed);session.changed.connect(self.connection)
 
     def keys(self,scope):
@@ -47,11 +49,12 @@ class VisionTuning(QObject):
         return dict(profiles=self.profiles,profile=self.profile,labRows=self.rows('lab'),cameraRows=self.rows('camera'),
             busy=self.busy,notice=self.notice,camera=self.camera,detector=self.detector,
             serial=self.serial,hasImage=not self.source.isNull(),pixels=self.selected_pixels,sourceLabel=self.source_label,
-            dirty=bool(self.drafts),watching=self.timer.isActive(),metas=self.metas,values=self.values|self.drafts)
+            live=self.preview_timer.isActive(),dirty=bool(self.drafts),watching=self.timer.isActive(),metas=self.metas,values=self.values|self.drafts)
 
     @Slot()
     def connection(self):
         if not self.session.connected:
+            self.preview_timer.stop();self.preview_frame=None
             self.timer.stop();self.queue=[];self.busy=False;self.metas={};self.values={};self.drafts={}
             self.profiles=[];self.profile='';self.camera={};self.detector={}
             self.source=QImage();self.overlay=QImage();self.lab=self.rgb=None;self.serial+=1
@@ -168,17 +171,43 @@ class VisionTuning(QObject):
         if not sent:
             self.notice=self.control.error;self.changed.emit()
 
+    @Slot(bool)
+    def live(self,enabled):
+        if enabled and self.session.connected:
+            self.preview_timer.start()
+            self.preview_frame=None
+            self.preview_tick()
+        else:
+            self.preview_timer.stop()
+        self.changed.emit()
+
+    def preview_tick(self):
+        fresh=time.monotonic()-getattr(self.video,'last_image_at',0)<=3
+        if not fresh or self.video.image.isNull():
+            if not self.source.isNull():
+                self.source=QImage();self.overlay=QImage();self.lab=self.rgb=None;self.serial+=1
+                self.source_label='Нет свежего видео — live-маска скрыта.'
+                self.preview_frame=None;self.changed.emit()
+            return
+        if self.busy or self.preview_frame==self.video.image_serial:return
+        self.capture_snapshot()
+
     @Slot()
     def snapshot(self):
+        self.live(False)
+        self.capture_snapshot()
+
+    def capture_snapshot(self):
         required=[f'vision.{self.profile}.{axis}_{suffix}' for axis in ('l','a','b') for suffix in ('min','max')]
         if self.busy or any(k not in self.values for k in required):
             self.notice='Сначала загрузите настройки и выберите цветовой фильтр.';self.changed.emit();return
         if self.video.image.isNull() or time.monotonic()-getattr(self.video,'last_image_at',0)>3:
             self.notice='Нет свежего QImage. Запустите runtime-видео с выводом appsink → QImage.';self.changed.emit();return
         from .lab_preview import pixels,rgb_lab
-        self.source=self.video.image.scaled(480,390,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+        self.source=self.video.image.scaled(640,520,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
         self.rgb=pixels(self.source);self.lab=rgb_lab(self.rgb)
-        self.source_label=f'Снимок декодированного {self.video.backend}, локальный №{self.video.image_serial}; не UnicamSequence'
+        self.preview_frame=self.video.image_serial
+        self.source_label=f'Кадр декодированного {self.video.backend}, локальный №{self.video.image_serial}; не UnicamSequence'
         self.recompute();self.changed.emit()
 
     def recompute(self):
@@ -194,6 +223,7 @@ class VisionTuning(QObject):
     @Slot(float,float,int)
     def pick(self,u,v,tolerance):
         if self.lab is None or not (0<=u<1 and 0<=v<1) or not 0<=tolerance<=30:return
+        self.live(False)
         import numpy as np
         h,w=self.lab.shape[:2];x,y=int(u*w),int(v*h)
         patch=self.lab[max(0,y-3):min(h,y+4),max(0,x-3):min(w,x+4)].reshape(-1,3)
@@ -205,3 +235,7 @@ class VisionTuning(QObject):
                 self.drafts[key]=max(m['min'],min(m['max'],value))
         self.notice='Пипетка создала черновик по области 7×7; проверьте маску перед сохранением.'
         self.recompute();self.changed.emit()
+
+    def shutdown(self):
+        self.timer.stop()
+        self.preview_timer.stop()
