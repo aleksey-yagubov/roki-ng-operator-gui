@@ -79,6 +79,7 @@ class Controller(QObject):
         self.clock.start()
         self._log("INFO", "Клиент запущен. Подключение только по явному действию оператора.")
         self.video = Video(self.transport, self.control, self._log, self)
+        self.localisation_video = Video(self.transport,self.control,self._log,self,context="localisationVideo")
         self.vision_tuning = VisionTuning(self.transport,self.control,self.video,self)
 
     @Property("QVariantMap", notify=changed)
@@ -371,6 +372,7 @@ class Controller(QObject):
         self.vision_tuning.shutdown()
         self.localisation.shutdown()
         self.video.shutdown()
+        self.localisation_video.shutdown()
         self.data_sources.shutdown()
         self.control.shutdown()
         self.clock.stop()

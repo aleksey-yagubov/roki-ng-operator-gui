@@ -24,6 +24,7 @@ def create_engine(controller):
     QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.OpenGL)
     engine = QQmlApplicationEngine()
     engine.addImageProvider("mainVideo", VideoImageProvider(controller.video))
+    engine.addImageProvider("localisationVideo", VideoImageProvider(controller.localisation_video))
     engine.addImageProvider("tuning",TuningImages(controller.vision_tuning))
     configure_docking(engine,ROOT)
     for name, value in {"backend": controller, "logsModel": controller.log_filter,
@@ -32,6 +33,7 @@ def create_engine(controller):
                         "localisation": controller.localisation,
                         "visionTuning":controller.vision_tuning,
                         "video": controller.video,
+                        "localisationVideo": controller.localisation_video,
                         "dataSources": controller.data_sources, "dataFieldsModel": controller.data_sources.rows,
                         "slotsModel": controller.slots, "testsModel": controller.tests,
                         "parametersModel": controller.parameter_filter, "workersModel": controller.workers}.items():

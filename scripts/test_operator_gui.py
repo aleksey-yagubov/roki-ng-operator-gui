@@ -356,15 +356,15 @@ def main():
             assert not item("localisationStart").isEnabled()
             snapshot("13a-localisation-candidate")
             click("localisationVideoStart")
-            wait_until(lambda: backend.video.phase=='running')
-            assert backend.video.backend=='localisation'
+            wait_until(lambda: backend.localisation_video.phase=='running')
+            assert backend.localisation_video.backend=='localisation'
             assert item("localisationProcessedVideo").isVisible()
             image=QImage(800,650,QImage.Format.Format_RGB32);image.fill(0xff208030)
-            backend.video.receiver.imageReady.emit(image);settle()
-            assert not backend.video.image.isNull()
+            backend.localisation_video.receiver.imageReady.emit(image);settle()
+            assert not backend.localisation_video.image.isNull()
             snapshot("13f-localisation-processed-video")
             click("localisationVideoStop")
-            wait_until(lambda: not backend.video.info and not backend.video.pending)
+            wait_until(lambda: not backend.localisation_video.info and not backend.localisation_video.pending)
             robot.localisation_age=1800
             click("localisationRefresh")
             wait_until(lambda: not backend.localisation.pending)

@@ -143,6 +143,21 @@ class VideoTests(unittest.TestCase):
         wait_until(lambda: not self.controller.transport.connected)
         self.assertFalse(video.unknown_create)
 
+    def test_main_and_localisation_players_are_independent_subscriptions(self):
+        main=self.manual()
+        debug=self.controller.localisation_video;debug.item=Item()
+        main.start(dict(SETTINGS,backend='runtime'))
+        wait_until(lambda:main.phase=='running')
+        main_id=main.info['stream_id']
+        debug.startLocalisation();wait_until(lambda:debug.phase=='running')
+        self.assertNotEqual(main_id,debug.info['stream_id'])
+        self.assertEqual(main.info['spec']['destination']['rtp_port'],5004)
+        self.assertEqual(debug.info['spec']['destination']['rtp_port'],5006)
+        debug.stop();wait_until(lambda:not debug.info and not debug.pending)
+        self.assertEqual(main.phase,'running')
+        self.assertIn(main_id,self.robot.streams)
+        self.assertFalse(any(m['op'] in ('camera.stop','localisation.stop') for m in self.robot.requests))
+
 
 class VideoValidationTests(unittest.TestCase):
     def test_spec_and_independent_decoder_sink(self):
@@ -159,3 +174,4 @@ class VideoValidationTests(unittest.TestCase):
         for values in (dict(height=650), dict(fps="nan"), dict(depth=9), dict(port=80)):
             with self.assertRaises(ValueError):
                 video_request(SETTINGS | values)
+

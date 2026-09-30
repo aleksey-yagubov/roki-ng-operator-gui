@@ -42,9 +42,10 @@ class Video(QObject):
     hideWindow = Signal()
     imageChanged = Signal()
 
-    def __init__(self, session, control, log, parent=None, receiver=None):
+    def __init__(self, session, control, log, parent=None, receiver=None, context="video"):
         super().__init__(parent)
         self.session, self.control, self.log = session, control, log
+        self.context = context
         self.receiver = receiver or Receiver(self)
         self.info = {}
         self.pending = ""
@@ -137,7 +138,7 @@ class Video(QObject):
 
     def request(self, op, body=None):
         self.pending = op
-        self.session.request(op, body or {}, "video")
+        self.session.request(op, body or {}, self.context)
         self.changed.emit()
 
     @Slot()
@@ -170,7 +171,7 @@ class Video(QObject):
     @Slot()
     def startLocalisation(self):
         self.start(dict(backend='localisation',width=800,height=650,fps=30,
-                        codec='h264',bitrate=2000000,port=5004,decoder='avdec_h264',sink='image'))
+                        codec='h264',bitrate=2000000,port=5006,decoder='avdec_h264',sink='image'))
 
     @Slot(QObject)
     def attach(self, item):
@@ -266,7 +267,7 @@ class Video(QObject):
 
     @Slot(str, object, str)
     def response(self, op, result, context):
-        if context != "video":
+        if context != self.context:
             return
         self.pending = ""
         if op == "video.capabilities":
@@ -298,7 +299,7 @@ class Video(QObject):
 
     @Slot(str, str, str)
     def failed(self, op, reason, context):
-        if context != "video":
+        if context != self.context:
             return
         self.pending = ""
         self.local_error(f"{op}: {reason}")

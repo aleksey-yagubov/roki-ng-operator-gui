@@ -37,13 +37,15 @@ ApplicationWindow {
         onStatusChanged: if (status === Loader.Error) video.media_error("Не удалось загрузить окно видео QML")
     }
     Connections {
+        target: localisationVideo
+        function onShowWindow() {
+            showDock(localisationDock)
+            localisationVideo.attach(localisationPanel.videoItem)
+        }
+    }
+    Connections {
         target: video
         function onShowWindow() {
-            if (video.view.backend === "localisation") {
-                showDock(localisationDock)
-                video.attach(localisationPanel.videoItem)
-                return
-            }
             if (video.view.sink === "image") {
                 if (videoWindowLoader.item) videoWindowLoader.item.hide()
                 showDock(imageDock)
