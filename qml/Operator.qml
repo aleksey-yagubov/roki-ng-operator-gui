@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumHeight: 700
     title: "ROKI NG Operator"
     onClosing: Qt.quit()
-    property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, catalogDock, parametersDock, dataDock, logsDock, diagnosticsDock]
+    property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, slotsDock, testsDock, parametersDock, dataDock, logsDock, diagnosticsDock]
     Loader {
         id: videoWindowLoader
         onStatusChanged: if (status === Loader.Error) video.media_error("Не удалось загрузить окно видео QML")
@@ -42,52 +42,69 @@ ApplicationWindow {
     function restoreLayout() { backend.layoutResult("Восстановление раскладки: " + saver.restoreFromFile(backend.layoutPath)) }
 
     header: ToolBar {
-        Flow {
+        RowLayout {
             width: parent.width
-            padding: 4
-            spacing: 6
-            ToolButton {
-                objectName: "panelsButton"
-                text: "Панели"
-                onClicked: panels.open()
-                Menu {
-                    id: panels
-                    MenuItem { text: "Подключение"; onTriggered: showDock(connectionDock) }
-                    MenuItem { text: "Ручное управление"; onTriggered: showDock(manualDock) }
-                    MenuItem { text: "Видео"; onTriggered: showDock(videoDock) }
-                    MenuItem { text: "Изображение (QImage)"; onTriggered: showDock(imageDock) }
-                    MenuItem { text: "Состояние"; onTriggered: showDock(statusDock) }
-                    MenuItem { text: "Слоты и тесты"; onTriggered: showDock(catalogDock) }
-                    MenuItem { text: "Параметры"; onTriggered: showDock(parametersDock) }
-                    MenuItem { text: "Источники данных"; onTriggered: showDock(dataDock) }
-                    MenuItem { text: "Журнал"; onTriggered: showDock(logsDock) }
-                    MenuItem { text: "Диагностика"; onTriggered: showDock(diagnosticsDock) }
+            spacing: 4
+            RowLayout {
+                id: layoutButtons
+                ToolButton {
+                    objectName: "panelsButton"
+                    text: "Панели"
+                    onClicked: panels.open()
+                    Menu {
+                        id: panels
+                        MenuItem { text: "Подключение"; onTriggered: showDock(connectionDock) }
+                        MenuItem { text: "Ручное управление"; onTriggered: showDock(manualDock) }
+                        MenuItem { text: "Видео"; onTriggered: showDock(videoDock) }
+                        MenuItem { text: "Изображение (QImage)"; onTriggered: showDock(imageDock) }
+                        MenuItem { text: "Состояние"; onTriggered: showDock(statusDock) }
+                        MenuItem { text: "Слоты"; onTriggered: showDock(slotsDock) }
+                        MenuItem { text: "Тесты"; onTriggered: showDock(testsDock) }
+                        MenuItem { text: "Параметры"; onTriggered: showDock(parametersDock) }
+                        MenuItem { text: "Источники данных"; onTriggered: showDock(dataDock) }
+                        MenuItem { text: "Журнал"; onTriggered: showDock(logsDock) }
+                        MenuItem { text: "Диагностика"; onTriggered: showDock(diagnosticsDock) }
+                    }
                 }
+                ToolButton { objectName: "saveLayoutButton"; text: window.width >= 1100 ? "Сохранить раскладку" : "Сохранить"; onClicked: saveLayout() }
+                ToolButton { objectName: "restoreLayoutButton"; text: "Восстановить"; onClicked: restoreLayout() }
+                ToolButton { text: "Управление"; visible: window.width >= 1100; onClicked: showDock(manualDock) }
             }
-            ToolButton { objectName: "saveLayoutButton"; text: "Сохранить раскладку"; onClicked: saveLayout() }
-            ToolButton { objectName: "restoreLayoutButton"; text: "Восстановить"; onClicked: restoreLayout() }
-            ToolButton {
-                objectName: "acquireButton"
-                text: "Получить управление"
-                visible: !controls.view.owns
-                enabled: backend.view.connected && !controls.view.pending
-                onClicked: controls.acquire()
-            }
-            ToolButton {
-                objectName: "releaseButton"
-                text: "Отдать управление"
-                visible: controls.view.owns
-                enabled: controls.view.pending !== "control.release"
-                onClicked: controls.release()
-            }
-            ToolButton { text: "Управление"; onClicked: showDock(manualDock) }
-            ToolButton { text: "Завершить цикл"; enabled: controls.view.owns; onClicked: controls.stop(false) }
-            ToolButton { objectName: "hardStopButton"; text: "СБРОС ОЧЕРЕДИ"; font.bold: true; enabled: controls.view.owns; onClicked: controls.stop(true) }
             Label {
-                padding: 8
+                objectName: "connectionSummary"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 40
                 text: backend.view.connection + " | " + backend.view.robot + " | " + backend.view.mode
                 elide: Text.ElideRight
-                width: Math.min(implicitWidth, window.width - 16)
+                ToolTip.visible: summaryHover.hovered
+                ToolTip.text: text
+                HoverHandler { id: summaryHover }
+            }
+            Frame {
+                id: robotControls
+                objectName: "robotControlsGroup"
+                Layout.rightMargin: 4
+                padding: 2
+                RowLayout {
+                    Button {
+                        objectName: "acquireButton"
+                        text: "Получить управление"
+                        font.bold: true
+                        visible: !controls.view.owns
+                        enabled: backend.view.connected && !controls.view.pending
+                        onClicked: controls.acquire()
+                    }
+                    Button {
+                        objectName: "releaseButton"
+                        text: "Отдать управление"
+                        font.bold: true
+                        visible: controls.view.owns
+                        enabled: controls.view.pending !== "control.release"
+                        onClicked: controls.release()
+                    }
+                    Button { text: "Завершить цикл"; enabled: controls.view.owns; onClicked: controls.stop(false) }
+                    Button { objectName: "hardStopButton"; text: "СБРОС ОЧЕРЕДИ"; font.bold: true; enabled: controls.view.owns; onClicked: controls.stop(true) }
+                }
             }
         }
     }
@@ -140,11 +157,18 @@ ApplicationWindow {
             StatusPanel { anchors.fill: parent; anchors.margins: 8 }
         }
         KDDW.DockWidget {
-            id: catalogDock
-            objectName: "catalogDock"
-            uniqueName: "catalog"
-            title: "Слоты и тесты"
-            CatalogPanel { anchors.fill: parent; anchors.margins: 8 }
+            id: slotsDock
+            objectName: "slotsDock"
+            uniqueName: "slots"
+            title: "Слоты"
+            CatalogPanel { kind: "slots"; anchors.fill: parent; anchors.margins: 8 }
+        }
+        KDDW.DockWidget {
+            id: testsDock
+            objectName: "testsDock"
+            uniqueName: "tests"
+            title: "Тесты"
+            CatalogPanel { kind: "tests"; anchors.fill: parent; anchors.margins: 8 }
         }
         KDDW.DockWidget {
             id: parametersDock
@@ -180,7 +204,8 @@ ApplicationWindow {
             connectionDock.addDockWidgetAsTab(videoDock)
             connectionDock.setAsCurrentTab()
             addDockWidget(statusDock, KDDW.KDDockWidgets.Location_OnRight, connectionDock)
-            statusDock.addDockWidgetAsTab(catalogDock)
+            statusDock.addDockWidgetAsTab(slotsDock)
+            statusDock.addDockWidgetAsTab(testsDock)
             statusDock.addDockWidgetAsTab(parametersDock)
             statusDock.addDockWidgetAsTab(dataDock)
             statusDock.addDockWidgetAsTab(diagnosticsDock)
