@@ -174,4 +174,3 @@ class VideoValidationTests(unittest.TestCase):
         for values in (dict(height=650), dict(fps="nan"), dict(depth=9), dict(port=80)):
             with self.assertRaises(ValueError):
                 video_request(SETTINGS | values)
-
