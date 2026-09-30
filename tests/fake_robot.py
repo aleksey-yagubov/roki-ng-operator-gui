@@ -32,6 +32,7 @@ class FakeRobot:
         self.lease = 7
         self.jobs = {}
         self.values = {}
+        self.head = {"pan": 0, "tilt": 0}
         self.subscriptions = {}
         self.streams = {}
         self.localisation_enabled = False
@@ -60,6 +61,7 @@ class FakeRobot:
 
     def sample(self, topic):
         data = ({"camera": {"alive": True, "state": "idle"}} if topic == "system.workers"
+                else {"head": dict(self.head)} if topic == "motion.state"
                 else {"state": "idle", "enabled": False})
         return dict(topic=topic, valid=True, source_mono_ns=123456, age_ms=5, data=data)
 
@@ -191,6 +193,10 @@ class FakeRobot:
             assert self.owner == self.session and body["lease_epoch"] == self.lease
             if op == "mode.set":
                 self.mode = body["mode"]
+                if self.mode == "IDLE":
+                    for job in self.jobs.values():
+                        if job["status"] == "running":
+                            job["status"] = "cancelled"
                 return {"state": self.mode}
             if op == "control.release":
                 self.owner = None
@@ -204,7 +210,8 @@ class FakeRobot:
                     job["status"] = "cancelled"
                 return {"stopped": True}
             if op == "motion.head":
-                return {"accepted": True, "target": {"pan": body["pan"], "tilt": body["tilt"]}}
+                self.head.update({axis: body[axis] for axis in ("pan", "tilt") if axis in body})
+                return {"accepted": True, "target": dict(self.head)}
             assert self.mode == "MANUAL"
             job_id = str(len(self.jobs) + 1)
             self.jobs[job_id] = dict(job_id=job_id, operation=op, status="running", progress=0)

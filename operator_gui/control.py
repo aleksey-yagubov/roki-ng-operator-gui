@@ -1,6 +1,7 @@
 """Explicit control lease and manual actions. No automatic acquire or mode change."""
 
 import math
+import time
 
 from PySide6.QtCore import QObject, Property, QEvent, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QWindow
@@ -57,11 +58,19 @@ class Control(QObject):
         self.job = {}
         self.error = ""
         self.pan = self.tilt = 0
+        self.head_target = None
+        self.head_dirty = False
+        self.head_edit = 0
+        self.head_sent_edit = 0
+        self.head_revision = 0
+        self.head_sync = ""
+        self.head_since = time.monotonic()
         self.head_step = 250
         self.keyboard = False
         self.held = set()
         self.speed = 0.5
-        self.hold_crouch = True
+        self.crouch = "off"
+        self.heading_hold = False
         self.zero_remaining = 0
         self.poll_pending = False
         session.changed.connect(self._connection)
@@ -73,7 +82,10 @@ class Control(QObject):
         self.job_timer = QTimer(self)
         self.job_timer.setInterval(500)
         self.job_timer.timeout.connect(self.refreshJob)
+        self.job_timer.timeout.connect(self.refreshHead)
         self.job_timer.start()
+        self.changed.connect(self.headChanged.emit)
+        self.barrierIssued.connect(self._invalidate_head)
 
     @property
     def owns(self):
@@ -132,12 +144,29 @@ class Control(QObject):
     def enterManual(self):
         self.command("mode.set", {"mode": "MANUAL"}, manual=False)
 
+    @Slot()
+    def leaveManual(self):
+        if not self.owns or self.mode != "MANUAL" or self.pending == "mode.set":
+            return
+        self.stopInput()
+        self.pending = "mode.set"
+        self.poll_pending = False
+        self.barrierIssued.emit()
+        self.session.interrupt("mode.set", {"lease_epoch": self.lease, "mode": "IDLE"})
+        self.changed.emit()
+
     def command(self, op, body, *, manual=True, job=True, context=""):
         if (not self.owns or self.pending or self.uncertain or (manual and self.mode != "MANUAL")
                 or (job and (self.moving or self.held))):
             self.reject("Команда не отправлена: нет управления, неверный режим или движение занято")
             return False
         self.pending = op
+        if op == "motion.head":
+            self.head_sent_edit = self.head_edit
+            self.head_revision += 1
+            self.head_sync = ""
+        elif job and (op.startswith("motion.") or op == "test.start"):
+            self._invalidate_head()
         self.error = ""
         self.session.request(op, dict(body, lease_epoch=self.lease), context)
         self.changed.emit()
@@ -151,12 +180,25 @@ class Control(QObject):
     @Slot(str)
     def pose(self, name):
         if name in ("base_stand", "stand", "crouch", "head_field"):
-            self.command("motion.pose", {"name": name})
+            body = {"name": name}
+            if name == "crouch":
+                body["crouch"] = "centered" if self.crouch == "centered" else "on"
+            self.command("motion.pose", body)
 
     @Slot(str)
     def jump(self, direction):
         if direction in ("forward", "backward", "left", "right", "turn_left", "turn_right"):
-            self.command("motion.jump", {"direction": direction, "fraction": 1.0})
+            self.command("motion.jump", {"direction": direction, "fraction": 1.0,
+                                         "crouch": self.crouch})
+
+    @Slot()
+    def getUp(self):
+        self.command("motion.get_up", {"crouch": self.crouch})
+
+    @Slot(str)
+    def splits(self, kind):
+        if kind in ("small", "big"):
+            self.command("motion.splits", {"kind": kind, "crouch": self.crouch})
 
     @Slot(str, int)
     def kick(self, leg, power):
@@ -174,12 +216,53 @@ class Control(QObject):
 
     @Property("QVariantMap", notify=headChanged)
     def headUi(self):
-        return dict(pan=self.pan, tilt=self.tilt, step=self.head_step)
+        allowed = (self.owns and self.mode == "MANUAL" and not self.pending and not self.uncertain
+                   and (not self.moving or self.job.get("operation") in ("motion.drive", "test.start")))
+        return dict(pan=self.pan, tilt=self.tilt, step=self.head_step,
+                    known=self.head_target is not None, dirty=self.head_dirty,
+                    canSend=allowed, canNudge=allowed and self.head_target is not None,
+                    targetPan=self.head_target["pan"] if self.head_target else None,
+                    targetTilt=self.head_target["tilt"] if self.head_target else None)
+
+    def _invalidate_head(self):
+        self.head_revision += 1
+        self.head_sync = ""
+        self.head_target = None
+        self.head_dirty = False
+        self.pan = self.tilt = 0
+        self.head_since = time.monotonic()
+        self.headChanged.emit()
+
+    def _head_target(self, target, *, update_draft):
+        if not isinstance(target, dict) or not all(
+                type(target.get(axis)) is int and low <= target[axis] <= high
+                for axis, low, high in (("pan", -2666, 2666), ("tilt", -2600, 950))):
+            return
+        self.head_target = {axis: target[axis] for axis in ("pan", "tilt")}
+        if update_draft:
+            self.pan, self.tilt = target["pan"], target["tilt"]
+            self.head_dirty = False
+        self.headChanged.emit()
+
+    @Slot()
+    def refreshHead(self):
+        if not self.owns or self.mode != "MANUAL" or self.pending or self.head_sync:
+            return
+        self.head_sync = f"head-state:{self.head_revision}"
+        self.head_requested_at = time.monotonic()
+        self.session.request("data.snapshot", {"topic": "motion.state"}, self.head_sync)
+
+    @Slot(str)
+    def resetHeadAxis(self, axis):
+        if axis in ("pan", "tilt"):
+            self.command("motion.head", {axis: 0, "frames": 10}, job=False)
 
     @Slot(int, int)
     def setHeadUi(self, pan, tilt):
         self.pan = max(-2666, min(2666, pan))
         self.tilt = max(-2600, min(950, tilt))
+        self.head_edit += 1
+        self.head_dirty = True
         self.headChanged.emit()
 
     @Slot(int)
@@ -189,7 +272,15 @@ class Control(QObject):
 
     @Slot(int, int)
     def adjustHead(self, pan, tilt):
-        self.head(max(-2666, min(2666, self.pan + pan)), max(-2600, min(950, self.tilt + tilt)))
+        if not self.headUi["canNudge"]:
+            self.reject("Голова занята или её заданная позиция ещё не получена")
+            return
+        values = {"frames": 10}
+        if pan:
+            values["pan"] = max(-2666, min(2666, self.head_target["pan"] + pan))
+        if tilt:
+            values["tilt"] = max(-2600, min(950, self.head_target["tilt"] + tilt))
+        self.command("motion.head", values, job=False)
 
     @Slot(str)
     def nudgeHead(self, direction):
@@ -219,13 +310,21 @@ class Control(QObject):
     @Slot(bool)
     def setKeyboard(self, enabled):
         self.stopInput()
-        self.keyboard = enabled and self.owns and self.mode == "MANUAL"
+        self.keyboard = enabled
         self.changed.emit()
 
-    @Slot(float, bool)
-    def driveSettings(self, speed, hold):
+    @Property("QVariantMap", notify=changed)
+    def driveUi(self):
+        return dict(speed=self.speed, crouch=self.crouch, headingHold=self.heading_hold)
+
+    @Slot(float, str, bool)
+    def driveSettings(self, speed, crouch, heading_hold):
+        if crouch not in ("off", "on", "centered"):
+            return
         self.speed = max(0.1, min(1.0, speed))
-        self.hold_crouch = hold
+        self.crouch = crouch
+        self.heading_hold = heading_hold
+        self.changed.emit()
 
     @Slot(str, bool)
     def hold(self, direction, pressed):
@@ -252,7 +351,6 @@ class Control(QObject):
             self.zero_remaining = 3
             self.drive_timer.start()
             self._drive()
-        self.keyboard = False
         self.changed.emit()
 
     def _drive(self):
@@ -262,7 +360,7 @@ class Control(QObject):
         h = self.held
         self.session.drive(dict(lease_epoch=self.lease, x=int("forward" in h)-int("backward" in h),
                                 y=int("left" in h)-int("right" in h), yaw=0.0,
-                                speed=self.speed, hold_crouch=self.hold_crouch))
+                                speed=self.speed, crouch=self.crouch, heading_hold=self.heading_hold))
         if not h:
             self.zero_remaining -= 1
             if not self.zero_remaining:
@@ -279,13 +377,19 @@ class Control(QObject):
 
     def eventFilter(self, watched, event):
         # Handle once at the application window, not once per QtQuick child.
-        if not self.keyboard or not isinstance(watched, QWindow):
+        if not self.keyboard or not self.owns or self.mode != "MANUAL" or not isinstance(watched, QWindow):
             return False
         if event.type() not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             return False
         key = event.key()
         directions = {Qt.Key.Key_W: "forward", Qt.Key.Key_S: "backward",
                       Qt.Key.Key_A: "left", Qt.Key.Key_D: "right"}
+        if event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
+                                | Qt.KeyboardModifier.MetaModifier):
+            # Keep standard shortcuts (including Ctrl+A/C) out of robot controls.
+            if event.type() == QEvent.Type.KeyRelease and key in directions and directions[key] in self.held:
+                self.hold(directions[key], False)
+            return False
         turns = {Qt.Key.Key_Q: "turn_left", Qt.Key.Key_E: "turn_right"}
         arrows = {Qt.Key.Key_Up: "up", Qt.Key.Key_Down: "down",
                   Qt.Key.Key_Left: "left", Qt.Key.Key_Right: "right"}
@@ -310,10 +414,10 @@ class Control(QObject):
     @Slot()
     def _connection(self):
         if not self.session.connected:
+            self._invalidate_head()
             self.lease = None
             self.pending = ""
             self.uncertain = False
-            self.keyboard = False
             self.held.clear()
             self.zero_remaining = 0
             self.drive_timer.stop()
@@ -323,16 +427,37 @@ class Control(QObject):
 
     @Slot(str, object, str)
     def _response(self, op, result, context):
+        if context.startswith("head-state:"):
+            if context != self.head_sync:
+                return
+            self.head_sync = ""
+            # Snapshots are cached worker heartbeats. Do not undo a newer command
+            # with a state observed before its acknowledgement/job completion.
+            age = result.get("age_ms")
+            if (result.get("topic") == "motion.state" and result.get("valid") is True
+                    and isinstance(age, (int, float)) and 0 <= age <= 1500
+                    and age <= (self.head_requested_at - self.head_since) * 1000):
+                self._head_target(result.get("data", {}).get("head"), update_draft=not self.head_dirty)
+            elif result.get("valid") is not True or not isinstance(age, (int, float)) or not 0 <= age <= 1500:
+                self.head_target = None
+                self.headChanged.emit()
+            return
+        was_moving = self.moving
+        was_manual = self.view["manual"]
         if op == self.pending:
             self.pending = ""
         if op == "control.acquire":
             self.lease = result["lease_epoch"]
+            self._invalidate_head()
         elif op == "control.release":
             self.lease = None
             self.mode = "IDLE"
             self.stopInput()
         elif op in ("session.heartbeat", "mode.set"):
             self.mode = result.get("state", self.mode)
+            if op == "mode.set" and self.mode == "IDLE":
+                self.uncertain = False
+                self.job = dict(self.job, status="cancelled", reason="Ручной режим выключен")
             if self.mode != "MANUAL":
                 self.stopInput()
         elif op == "system.status":
@@ -342,30 +467,47 @@ class Control(QObject):
             if not self.owns or self.mode != "MANUAL":
                 self.stopInput()
         elif op == "motion.head":
-            self.pan = result.get("target", {}).get("pan", self.pan)
-            self.tilt = result.get("target", {}).get("tilt", self.tilt)
-            self.headChanged.emit()
+            self.head_since = time.monotonic()
+            self._head_target(result.get("target"), update_draft=self.head_edit == self.head_sent_edit)
         elif op == "job.status":
             self.poll_pending = False
             if result.get("job_id") == self.job.get("job_id"):
                 self.job = result
         elif op == "motion.stop_hard":
+            self._invalidate_head()
             self.uncertain = False
             self.job = dict(self.job, status="cancelled", reason="Очередь STM сброшена; поза неизвестна")
         elif result.get("job_id") and result.get("accepted"):
             if result["job_id"] != self.job.get("job_id"):
                 self.job = dict(job_id=result["job_id"], operation=op, status="accepted")
+        if was_moving and not self.moving:
+            self._invalidate_head()
+        if was_manual != self.view["manual"]:
+            self._invalidate_head()
+        self.headChanged.emit()
         self.changed.emit()
 
     def notification(self, op, body):
         if op.startswith("job.") and body.get("job_id"):
             if body["job_id"] == self.job.get("job_id"):
+                was_moving = self.moving
                 self.job = self.job | body
+                if was_moving and not self.moving:
+                    self._invalidate_head()
+                self.headChanged.emit()
                 self.changed.emit()
 
     @Slot(str, str, str)
     def _failed(self, op, message, context):
+        if context.startswith("head-state:"):
+            if context == self.head_sync:
+                self.head_sync = ""
+                self.head_target = None
+                self.headChanged.emit()
+            return
         if op == self.pending:
+            if op == "motion.head":
+                self._invalidate_head()
             self.pending = ""
             self.error = message
             if "outcome unknown" in message:

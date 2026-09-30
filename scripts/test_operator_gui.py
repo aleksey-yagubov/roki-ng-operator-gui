@@ -11,7 +11,7 @@ import traceback
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QEventLoop, QMetaObject, QObject, QPointF, QTimer, Qt, QUrl
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QMetaObject, QObject, QPointF, QTimer, Qt, QUrl
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtQml import QQmlExpression
@@ -72,6 +72,20 @@ def main():
     def click(name, first_row=False):
         obj = item(name)
         assert isinstance(obj, QQuickItem) and obj.isVisible() and obj.isEnabled(), name
+        ancestor = obj.parentItem()
+        while ancestor is not None:
+            if ancestor.objectName() == "manualScroll":
+                viewport = ancestor.property("contentItem")
+                position = obj.mapToItem(viewport, QPointF(0, 0))
+                for axis, coordinate, size, extent in (
+                        ("Y", position.y(), obj.height(), viewport.height()),
+                        ("X", position.x(), obj.width(), viewport.width())):
+                    if coordinate < 0 or coordinate + size > extent:
+                        viewport.setProperty("content" + axis,
+                                             max(0, viewport.property("content" + axis) + coordinate - 8))
+                settle()
+                break
+            ancestor = ancestor.parentItem()
         center = obj.mapToScene(QPointF(obj.width() / 2, 13 if first_row else obj.height() / 2))
         target = obj.window()
         assert 0 <= center.x() < target.width() and 0 <= center.y() < target.height(), f"Clipped {name}: {center}"
@@ -112,17 +126,31 @@ def main():
             click("capabilitiesButton")
             wait_until(lambda: "simulated" in backend.capabilities_text)
             snapshot("03-status")
-            show("catalogDock")
-            click("catalogButton")
+            show("slotsDock")
+            click("slotsButton")
             wait_until(lambda: backend.slots.rowCount() == 57)
             snapshot("04-slots")
-            click("testsTab")
-            click("catalogButton")
+            show("testsDock")
+            click("testsButton")
             wait_until(lambda: backend.tests.rowCount() == 4)
             wait_until(lambda: len(backend.test_schemas) == 4)
             settle()
             assert not item("startTest_run_test").isEnabled()
             snapshot("05-tests")
+            slots_dock = item("slotsDock")
+            slots_dock.setProperty("isFloating", True)
+            settle()
+            assert slots_dock.property("isFloating") and slots_dock.property("isOpen")
+            show("testsDock")
+            assert item("testsDock").property("isOpen")
+            assert not item("testsDock").property("isFloating")
+            assert QMetaObject.invokeMethod(slots_dock, "forceClose")
+            assert item("testsDock").property("isOpen")
+            show("slotsDock")
+            slots_dock.setProperty("isFloating", False)
+            settle()
+            show("testsDock")
+            snapshot("05-separate-panels")
             show("parametersDock")
             click("parametersButton")
             wait_until(lambda: backend.parameters.rowCount() == 3)
@@ -162,10 +190,14 @@ def main():
             settle()
             for name in ("dataListButton", "dataSnapshotButton", "dataSubscribeButton", "dataUnsubscribeButton", "dataFields", "dataRawDetails"):
                 obj = item(name)
-                edge = obj.mapToScene(QPointF(obj.width(), obj.height()))
-                origin = obj.mapToScene(QPointF(0, 0))
-                assert origin.x() >= 0 and origin.y() >= 0 and edge.x() <= window.width() and edge.y() <= item("logsList").mapToScene(QPointF(0, 0)).y(), f"Clipped {name}: {edge}; window={window.width()}x{window.height()}, logs_y={item('logsList').mapToScene(QPointF(0,0)).y()}"
-            snapshot("06-data-minimum-window")
+                def within_panel():
+                    edge = obj.mapToScene(QPointF(obj.width(), obj.height()))
+                    origin = obj.mapToScene(QPointF(0, 0))
+                    return (origin.x() >= 0 and origin.y() >= 0 and edge.x() <= window.width()
+                            and edge.y() <= item("logsList").mapToScene(QPointF(0, 0)).y())
+                # Wayland resize acknowledgement and Qt layout polish are asynchronous.
+                wait_until(within_panel)
+            snapshot("06-data-small")
             window.resize(1200, 800)
             settle()
             show("parametersDock")
@@ -180,6 +212,30 @@ def main():
             assert backend.logs.rowCount() == before
             click("pauseLogsCheck")
             assert not backend.logs_paused
+            item("logSearch").setProperty("text", "GUI test message")
+            settle()
+            click("copyLogsButton")
+            copied = app.clipboard().text()
+            assert "GUI test message" in copied and "arrived while paused" not in copied, copied
+            robot.send_log("GUI test message second line")
+            entry = item("logText")
+            wait_until(lambda: "second line" in entry.property("text"))
+            assert entry.property("readOnly") and entry.property("selectByMouse")
+            click("logText")
+            QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+            QTest.keyClick(window, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+            assert app.clipboard().text() == entry.property("text")
+            selected = app.clipboard().text()
+            assert "\n" in selected
+            robot.send_log("GUI test message during selection")
+            wait_until(lambda: any(r["message"].endswith("during selection") for r in backend.history))
+            settle(300)
+            assert entry.property("text") == selected
+            QTest.keyClick(window, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+            assert app.clipboard().text() == selected
+            QMetaObject.invokeMethod(entry, "deselect")
+            wait_until(lambda: "during selection" in entry.property("text"))
+            item("logSearch").setProperty("text", "")
             snapshot("07-logs")
             ticks = []
             ui_timer = QTimer()
@@ -236,6 +292,13 @@ def main():
             assert window.minimumWidth() == 1200 and window.minimumHeight() == 800
             window.resize(window.minimumWidth(), window.minimumHeight())
             settle(300)
+            group = item("robotControlsGroup")
+            right = group.mapToScene(QPointF(group.width(), 0)).x()
+            assert 0 <= window.width() - right <= 10, f"Robot controls not right-aligned: {right}"
+            summary = item("connectionSummary")
+            summary_y = summary.mapToScene(QPointF(0, summary.height() / 2)).y()
+            controls_y = group.mapToScene(QPointF(0, group.height() / 2)).y()
+            assert abs(summary_y - controls_y) < 2, "Connection status moved to another row"
             for name in ("robotHost", "parametersList", "logsList"):
                 obj = item(name)
                 edge = obj.mapToScene(QPointF(obj.width(), obj.height()))
@@ -244,6 +307,9 @@ def main():
             assert robot.game_running
             assert not any(m["op"] in ("control.acquire", "mode.set", "video.start", "test.start", "motion.pose") for m in robot.requests)
             window.resize(1200, 900)
+            settle(300)
+            right = group.mapToScene(QPointF(group.width(), 0)).x()
+            assert 0 <= window.width() - right <= 10, f"Robot controls not right-aligned: {right}"
             show("connectionDock")
             click("connectButton")
             wait_until(lambda: backend.transport.connected)
@@ -259,12 +325,34 @@ def main():
             wait_until(lambda: robot.values.get("head.field_tilt") == -1150)
             assert robot.mode == "GAME", "Editing a parameter must not enter manual mode"
             snapshot("12-global-control")
-            show("catalogDock")
-            assert item("catalogManualButton").isEnabled()
-            assert "ручной режим" in item("catalogBlockedReason").property("text")
-            click("catalogManualButton")
+            show("testsDock")
+            assert item("testsManualButton").isEnabled()
+            assert "ручной режим" in item("testsBlockedReason").property("text")
+            click("testsManualButton")
             wait_until(lambda: backend.control.view["manual"] and not backend.control.pending)
             show("manualDock")
+            assert backend.control.driveUi["crouch"] == "off"
+            click("crouchMode")
+            QTest.keyClick(window, Qt.Key.Key_End)
+            QTest.keyClick(window, Qt.Key.Key_Return)
+            wait_until(lambda: backend.control.driveUi["crouch"] == "centered")
+            click("headingHoldCheck")
+            assert backend.control.driveUi["headingHold"]
+            for button, op, expected in (
+                    ("crouchButton", "motion.pose", {"name": "crouch"}),
+                    ("getUpButton", "motion.get_up", {}),
+                    ("splitsSmallButton", "motion.splits", {"kind": "small"}),
+                    ("splitsBigButton", "motion.splits", {"kind": "big"})):
+                click(button)
+                wait_until(lambda: backend.control.moving and not backend.control.pending)
+                request = [m for m in robot.requests if m["op"] == op][-1]
+                assert request["body"] == dict(expected, crouch="centered", lease_epoch=7), request
+                assert not item("getUpButton").isEnabled()
+                assert not item("splitsSmallButton").isEnabled()
+                assert not item("splitsBigButton").isEnabled()
+                click("hardStopButton")
+                wait_until(lambda: not backend.control.moving and not backend.control.pending)
+            snapshot("12-manual-new-actions")
             click("baseStandButton")
             wait_until(lambda: backend.control.moving)
             assert not item("baseStandButton").isEnabled()
@@ -273,6 +361,7 @@ def main():
             snapshot("12-manual-controls")
             click("keyboardCheck")
             assert backend.control.keyboard
+            wait_until(lambda: backend.control.headUi["canNudge"])
             before_tilt = backend.control.tilt
             QTest.keyClick(window, Qt.Key.Key_Up)
             wait_until(lambda: backend.control.tilt == before_tilt + backend.control.head_step and not backend.control.pending)
@@ -282,7 +371,14 @@ def main():
             wait_until(lambda: any(m["op"] == "motion.drive" and m["body"]["x"] == 1 for m in robot.requests))
             QTest.keyRelease(window, Qt.Key.Key_W)
             wait_until(lambda: any(m["op"] == "motion.drive" and m["body"]["x"] == 0 for m in robot.requests))
+            drive = [m for m in robot.requests if m["op"] == "motion.drive"][-1]["body"]
+            assert drive["crouch"] == "centered" and drive["heading_hold"] is True, drive
             show("parametersDock")
+            assert backend.control.keyboard, "Hiding manual controls cleared the keyboard preference"
+            before_motion = sum(m["op"].startswith("motion.") for m in robot.requests)
+            QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+            settle()
+            assert sum(m["op"].startswith("motion.") for m in robot.requests) == before_motion
             click("parametersButton")
             wait_until(lambda: backend.parameters.rowCount() == 3)
             click("parametersList", first_row=True)
@@ -381,8 +477,8 @@ def main():
             wait_until(lambda: not backend.localisation.view['running'] and not backend.control.pending)
             assert backend.localisation.view['pose']==[]
 
-            show("catalogDock")
-            click("catalogButton")
+            show("testsDock")
+            click("testsButton")
             wait_until(lambda: len(backend.test_schemas) == 4)
             click("startTest_run_test")
             wait_until(lambda: backend.control.moving)
@@ -390,6 +486,14 @@ def main():
             click("hardStopButton")
             wait_until(lambda: not backend.control.pending)
             show("manualDock")
+            assert item("manualModeButton").property("checked")
+            click("manualModeButton")
+            wait_until(lambda: backend.control.mode == "IDLE" and not backend.control.pending)
+            assert not item("manualModeButton").property("checked")
+            assert backend.control.owns
+            click("manualModeButton")
+            wait_until(lambda: backend.control.view["manual"] and not backend.control.pending)
+            assert item("manualModeButton").property("checked")
             click("releaseButton")
             wait_until(lambda: not backend.control.owns)
             assert not robot.errors, robot.errors
@@ -406,7 +510,12 @@ def main():
             app.exit(0 if result["passed"] else 1)
 
     QTimer.singleShot(500, run)
-    return app.exec()
+    code = app.exec()
+    # Destroy native QML/docking objects while the QApplication still exists.
+    engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    inspected_items.clear()
+    return code
 
 
 if __name__ == "__main__":
