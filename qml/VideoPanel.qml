@@ -43,8 +43,6 @@ ScrollView {
             TextField { id: bitrate; text: "2000000"; enabled: codec.currentText === "h264"; Layout.fillWidth: true }
             Label { text: "Декодер ПК" }
             ComboBox { id: decoder; model: codec.currentText === "h264" ? (Qt.platform.os === "osx" ? ["avdec_h264"] : ["vah264dec", "avdec_h264"]) : (Qt.platform.os === "osx" ? ["jpegdec"] : ["vajpegdec", "jpegdec"]); Layout.fillWidth: true }
-            Label { text: "Вывод (sink)" }
-            ComboBox { id: sink; model: ["appsink → QImage (копия)", "qml6glsink (GPU)"]; Layout.fillWidth: true }
             Label { text: "UDP-порт ПК" }
             SpinBox { id: port; from: 1024; to: 65535; value: 5004; editable: true; Layout.fillWidth: true }
         }
@@ -58,7 +56,7 @@ ScrollView {
                 enabled: video.view.canStart
                 onClicked: video.start({backend:sourceBackend.currentText,sensorWidth: sw.text, sensorHeight: sh.text, depth: depth.currentText,
                     width: ow.text, height: oh.text, fps: fps.text, codec: codec.currentText,
-                    bitrate: bitrate.text, port: port.value, decoder: decoder.currentText, sink: sink.currentIndex === 0 ? "image" : "gl"})
+                    bitrate: bitrate.text, port: port.value, decoder: decoder.currentText})
             }
             Button { objectName: "videoStopButton"; text: "Остановить видео"; enabled: video.view.canStop; onClicked: video.stop() }
             Button { text: "Показать окно"; enabled: video.view.streamId !== ""; onClicked: video.showWindow() }

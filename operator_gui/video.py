@@ -3,7 +3,7 @@
 import json
 import sys
 import time
-from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot, Qt
+from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
 
 from .control import scalar
@@ -54,14 +54,12 @@ class Video(QObject):
         self.capabilities = {}
         self.media = {}
         self.item = None
-        self.render_window = None
         self.cancelled = False
         self.local_busy = False
         self.unknown_create = False
         self.hide_on_stop = False
         self.decoder = "avdec_h264" if sys.platform == "darwin" else "vah264dec"
         self.latency = 30
-        self.output = "image"
         self.image = QImage()
         self.image_serial = 0
         self.last_image_at = 0.
@@ -91,7 +89,6 @@ class Video(QObject):
                    + f"выход {output.get('width', '?')}x{output.get('height', '?')}, {output.get('fps', '?')} FPS."
                    if self.capabilities else "Возможности ещё не запрошены.")
         return dict(phase=self.phase, error=self.error, pending=self.pending,backend=self.backend,
-                    sink=self.output,
                     canStart=not reason, startBlockedReason=reason,
                     canEditSettings=not self.info and not self.local_busy and not self.unknown_create
                     and self.pending in ("", "video.capabilities"),
@@ -156,10 +153,8 @@ class Video(QObject):
             self.image=QImage();self.last_image_at=0.;self.image_serial+=1;self.imageChanged.emit()
             self.decoder = values["decoder"]
             from .video_receiver import receiver_description
-            output = values.get("sink", "image")
-            receiver_description(dict(encoding_name=spec["codec"]["name"].upper(), payload_type=96, ssrc=0), self.decoder, 30, output)
-            self.receiver.prepare(output)
-            self.output = output
+            receiver_description(dict(encoding_name=spec["codec"]["name"].upper(), payload_type=96, ssrc=0), self.decoder, 30)
+            self.receiver.prepare()
             self.cancelled = False
             self.media = {}
             self.error = ""
@@ -171,7 +166,7 @@ class Video(QObject):
     @Slot()
     def startLocalisation(self):
         self.start(dict(backend='localisation',width=800,height=650,fps=30,
-                        codec='h264',bitrate=2000000,port=5006,decoder='avdec_h264',sink='image'))
+                        codec='h264',bitrate=2000000,port=5006,decoder='avdec_h264'))
 
     @Slot(QObject)
     def attach(self, item):
@@ -179,31 +174,18 @@ class Video(QObject):
         window = item.window()
         if window is None:
             item.windowChanged.connect(lambda _window: self.attach(item))
-        elif self.output == "gl":
-            self.disconnect_render()
-            self.render_window = window
-            # A dynamically loaded Gst item needs its first render too, even if
-            # the surrounding window's scene graph already existed.
-            window.afterRendering.connect(self.surface_ready, Qt.ConnectionType.QueuedConnection)
-            window.update()
         else:
             self.surface_ready()
-
-    def disconnect_render(self):
-        if self.render_window is not None:
-            self.render_window.afterRendering.disconnect(self.surface_ready)
-            self.render_window = None
 
     @Slot()
     def surface_ready(self):
         if self.phase != "receiver" or self.cancelled or self.local_busy:
             return
-        if not self.item or not self.item.window() or (self.output == "gl" and not self.item.window().isSceneGraphInitialized()):
+        if not self.item or not self.item.window():
             return
         try:
-            self.disconnect_render()
             self.local_busy = True
-            self.receiver.start(self.item, self.info, self.decoder, self.latency)
+            self.receiver.start(self.info, self.decoder, self.latency)
         except Exception as exc:
             self.local_error(str(exc))
             self.receiver.stop()
@@ -218,7 +200,6 @@ class Video(QObject):
 
     @Slot()
     def stop(self):
-        self.disconnect_render()
         self.cancelled = True
         self.timer.stop()
         self.receiver.stop()
@@ -232,7 +213,6 @@ class Video(QObject):
     @Slot()
     def local_stopped(self):
         self.local_busy = False
-        self.receiver.detach()
         if self.hide_on_stop:
             self.hide_on_stop = False
             self.hideWindow.emit()
@@ -334,6 +314,5 @@ class Video(QObject):
             self.changed.emit()
 
     def shutdown(self):
-        self.disconnect_render()
         self.timer.stop()
         self.receiver.shutdown()

@@ -32,10 +32,6 @@ ApplicationWindow {
     title: "ROKI NG Operator"
     onClosing: Qt.quit()
     property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, slotsDock, testsDock, parametersDock, fieldDock, localisationDock, visionDock, dataDock, logsDock, diagnosticsDock]
-    Loader {
-        id: videoWindowLoader
-        onStatusChanged: if (status === Loader.Error) video.media_error("Не удалось загрузить окно видео QML")
-    }
     Connections {
         target: localisationVideo
         function onShowWindow() {
@@ -46,20 +42,10 @@ ApplicationWindow {
     Connections {
         target: video
         function onShowWindow() {
-            if (video.view.sink === "image") {
-                if (videoWindowLoader.item) videoWindowLoader.item.hide()
-                showDock(imageDock)
-                video.attach(imagePanel.videoItem)
-            } else {
-                imageDock.forceClose()
-                if (!videoWindowLoader.source.toString()) videoWindowLoader.source = "VideoDisplay.qml"
-                else {
-                    videoWindowLoader.item.show()
-                    video.attach(videoWindowLoader.item.videoItem)
-                }
-            }
+            showDock(imageDock)
+            video.attach(imagePanel.videoItem)
         }
-        function onHideWindow() { if (video.view.sink === "image") imageDock.forceClose() }
+        function onHideWindow() { imageDock.forceClose() }
     }
 
     function showDock(dock) { dock.open(); dock.setAsCurrentTab() }

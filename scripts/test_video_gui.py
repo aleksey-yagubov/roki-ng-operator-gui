@@ -13,7 +13,7 @@ import faulthandler
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QTimer, QUrl, QObject, QMetaObject
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer, QUrl, QObject, QMetaObject
 from PySide6.QtGui import QGuiApplication
 from roki_operator import create_engine
 from operator_gui.controller import Controller
@@ -87,44 +87,39 @@ def main():
                 video = controller.video
                 video.getCapabilities()
                 wait_until(lambda: bool(video.capabilities))
-                for codec, decoder, sink in (("h264", "vah264dec", "image"), ("jpeg", "vajpegdec", "image"),
-                                              ("jpeg", "jpegdec", "image"), ("h264", "avdec_h264", "image"),
-                                              ("h264", "vah264dec", "gl"), ("jpeg", "vajpegdec", "gl")):
+                for codec, decoder in (("h264", "vah264dec"), ("jpeg", "vajpegdec"),
+                                       ("jpeg", "jpegdec"), ("h264", "avdec_h264")):
                     video.start(dict(sensorWidth=1600, sensorHeight=1300, depth=10, width=800,
                                      height=648, fps=30, codec=codec, bitrate=2000000,
-                                     port=video_port, decoder=decoder, sink=sink))
+                                     port=video_port, decoder=decoder))
                     wait_until(lambda: video.view["frames"] >= 30 or bool(video.error), 15000)
                     assert not video.error, video.error
                     assert video.view["size"] == "800x648", video.view
                     wait_until(lambda: video.view["fps"] is not None and 25 < video.view["fps"] < 35, 5000)
                     assert not warnings, warnings
-                    if sink == "image":
-                        assert video.item.window() == window
-                        stream_id = video.info["stream_id"]
-                        before = video.imageSerial
-                        image_dock.setProperty("isFloating", True)
-                        wait_until(lambda: video.item.window() != window and video.imageSerial > before + 5)
-                        assert video.info["stream_id"] == stream_id
-                        assert video.item.window().grabWindow().save(str(output / f"{len(report['cycles'])}-floating.png"))
-                        before = video.imageSerial
-                        image_dock.setProperty("isFloating", False)
-                        wait_until(lambda: video.item.window() == window and video.imageSerial > before + 5)
-                        QMetaObject.invokeMethod(image_dock, "forceClose")
-                        before = video.imageSerial
-                        wait_until(lambda: video.imageSerial > before + 5)
-                        QMetaObject.invokeMethod(image_dock, "open")
-                        QMetaObject.invokeMethod(image_dock, "setAsCurrentTab")
-                        assert video.info["stream_id"] == stream_id
+                    assert video.item.window() == window
+                    stream_id = video.info["stream_id"]
+                    before = video.imageSerial
+                    image_dock.setProperty("isFloating", True)
+                    wait_until(lambda: video.item.window() != window and video.imageSerial > before + 5)
+                    assert video.info["stream_id"] == stream_id
+                    assert video.item.window().grabWindow().save(str(output / f"{len(report['cycles'])}-floating.png"))
+                    before = video.imageSerial
+                    image_dock.setProperty("isFloating", False)
+                    wait_until(lambda: video.item.window() == window and video.imageSerial > before + 5)
+                    QMetaObject.invokeMethod(image_dock, "forceClose")
+                    before = video.imageSerial
+                    wait_until(lambda: video.imageSerial > before + 5)
+                    QMetaObject.invokeMethod(image_dock, "open")
+                    QMetaObject.invokeMethod(image_dock, "setAsCurrentTab")
+                    assert video.info["stream_id"] == stream_id
                     frame = video.item.window().grabWindow()
                     assert frame.save(str(output / f"{len(report['cycles'])}-{codec}.png"))
-                    report["cycles"].append(dict(codec=codec, decoder=decoder, sink=sink, fps=video.view["fps"], frames=video.view["frames"], size=video.view["size"]))
+                    report["cycles"].append(dict(codec=codec, decoder=decoder, fps=video.view["fps"], frames=video.view["frames"], size=video.view["size"]))
                     print("PASS", report["cycles"][-1], flush=True)
                     video.closeWindow()
                     wait_until(lambda: not video.info and not video.pending and not video.local_busy, 5000)
-                    if sink == "image":
-                        assert not image_dock.property("isOpen")
-                    else:
-                        assert not video.item.window().isVisible()
+                    assert not image_dock.property("isOpen")
                 assert not robot.errors, robot.errors
                 report["passed"] = True
             except Exception:
@@ -142,6 +137,8 @@ def main():
         finally:
             controller.shutdown()
             robot.close()
+            engine.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 if __name__ == "__main__":

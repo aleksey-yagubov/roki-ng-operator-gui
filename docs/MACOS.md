@@ -29,7 +29,7 @@ scripts/run_macos.sh --robot 192.168.0.120
 scripts/install_gstreamer_macos.sh
 ```
 
-Скрипт проверяет настоящий приёмник локальными RTP-потоками H.264 и JPEG до QImage. На macOS выбирайте avdec_h264 / jpegdec и вывод appsink → QImage. Linux VA-декодеры на Mac недоступны. GPU-вывод qml6glsink требует отдельного совместимого Qt-плагина и этой установкой не гарантируется.
+Скрипт проверяет настоящий приёмник локальными RTP-потоками H.264 и JPEG до QImage. На macOS выбирайте avdec_h264 / jpegdec; вывод выполняется через appsink → QImage. Linux VA-декодеры на Mac недоступны.
 Это локальная сборка из исходников, не автономный подписанный .app/DMG.
 
 Проверка: 35 тестов `python -m unittest discover -s tests` прошли с указанным Qt.

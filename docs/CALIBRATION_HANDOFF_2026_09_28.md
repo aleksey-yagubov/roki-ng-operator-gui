@@ -61,8 +61,8 @@ params.get {keys}. Прежние одиночные key/value форматы с
   install_gstreamer_macos.sh и check_gstreamer.py.
 - Полный runtime suite на macOS ранее имел 6 платформенных ошибок Unix
   seqpacket/worker-тестов; текущий прогон целевой, не подтверждает весь suite
-  на Linux/Buildroot. GPU qml6glsink и физическая камера в локальном RTP-тесте
-  не проверялись.
+  на Linux/Buildroot. Физическая камера в локальном RTP-тесте
+  не проверялась.
 
 ## Следующие шаги
 

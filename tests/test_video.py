@@ -10,7 +10,7 @@ from tests.test_operator import wait_until
 
 
 SETTINGS = dict(sensorWidth=1600, sensorHeight=1300, depth=10, width=800, height=648,
-                fps=60, codec="jpeg", bitrate=2000000, port=5004, decoder="vajpegdec", sink="image")
+                fps=60, codec="jpeg", bitrate=2000000, port=5004, decoder="vajpegdec")
 
 
 class ReceiverStub(QObject):
@@ -21,17 +21,14 @@ class ReceiverStub(QObject):
     imageReady = Signal(object)
     log = Signal(str, str)
 
-    def prepare(self, output):
-        self.output = output
+    def prepare(self):
+        pass
 
     def start(self, *args):
         self.ready.emit()
 
     def stop(self):
         self.stopped.emit()
-
-    def detach(self):
-        pass
 
     def shutdown(self):
         pass
@@ -160,17 +157,18 @@ class VideoTests(unittest.TestCase):
 
 
 class VideoValidationTests(unittest.TestCase):
-    def test_spec_and_independent_decoder_sink(self):
+    def test_spec_and_decoder_choices_with_qimage(self):
         spec = video_request(SETTINGS)
         self.assertNotIn("bitrate", spec["codec"])
         self.assertEqual(spec["sensor"], dict(width=1600, height=1300, depth=10))
-        info = dict(encoding_name="JPEG", payload_type=26, ssrc=123)
-        for decoder in ("vajpegdec", "jpegdec"):
-            for output in ("gl", "image"):
-                launch = receiver_description(info, decoder, 30, output)
+        for codec, decoders in (("JPEG", ("vajpegdec", "jpegdec")),
+                                ("H264", ("vah264dec", "avdec_h264"))):
+            info = dict(encoding_name=codec, payload_type=96, ssrc=123)
+            for decoder in decoders:
+                launch = receiver_description(info, decoder, 30)
                 self.assertIn(decoder, launch)
-                self.assertEqual("appsink" in launch, output == "image")
-                self.assertEqual("glupload" in launch, output == "gl")
+                self.assertIn("appsink name=frames", launch)
+                self.assertIn("video/x-raw,format=RGBA", launch)
         for values in (dict(height=650), dict(fps="nan"), dict(depth=9), dict(port=80)):
             with self.assertRaises(ValueError):
                 video_request(SETTINGS | values)
