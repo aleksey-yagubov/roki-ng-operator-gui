@@ -46,6 +46,7 @@ class Localisation(QObject):
             if result.get('lines',0)<3:problems.append('Недостаточно отрезков для сопоставления')
             if not result.get('circle'):problems.append('Круг не найден или виден неполностью')
             if not result.get('goal_pairs'):problems.append('Нет пригодной пары цветных стоек')
+            if result.get('goal_rejected'):problems.append(f"Цветных областей без подтверждения ворот: {result['goal_rejected']} (размер, положение на карте или неопределённая поза)")
             if result.get('fit_state')=='weak' or 'weak_geometry' in result.get('reason',''):problems.append('Линии плохо совпадают с картой: проверьте размеры поля, высоту и калибровку камеры')
             if result.get('ambiguous'):problems.append('Несколько возможных позиций: сторона поля не определена')
             if result.get('reason')=='motion_discontinuity':problems.append('Скачок превышает допустимую скорость: проверьте наблюдения или задайте позу после перестановки')

@@ -31,6 +31,11 @@ class LocalisationTests(unittest.TestCase):
         state=dict(running=True,age_ms=10,result={'valid':False,'candidate':[1.,.2,.4]})
         state.update(kw)
         self.session.response.emit('localisation.status',state,'localisation:status')
+    def test_rejected_goal_candidates_explain_missing_boxes(self):
+        self.result(result={'goal_rejected':4,'fit_state':'ambiguous','ambiguous':True})
+        self.assertIn('без подтверждения ворот: 4',self.model.view['problems'])
+        self.assertEqual(self.model.view['pose'],[])
+
     def test_no_implicit_start_or_requests(self):
         self.assertFalse(self.session.requests)
         self.assertFalse(self.control.commands)
