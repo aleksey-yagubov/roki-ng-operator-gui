@@ -355,6 +355,12 @@ def main():
             assert abs(command['body']['prior'][2]-1.57079632679)<1e-8
             assert not item("localisationStart").isEnabled()
             snapshot("13a-localisation-candidate")
+            show("statusDock")
+            wait_until(lambda:not backend.localisation.view['watching'])
+            before=sum(m['op']=='localisation.status' for m in robot.requests)
+            show("localisationDock")
+            wait_until(lambda:backend.localisation.view['watching'] and sum(m['op']=='localisation.status' for m in robot.requests)>before)
+            snapshot("13g-localisation-poll-resumes")
             click("localisationVideoStart")
             wait_until(lambda: backend.localisation_video.phase=='running')
             assert backend.localisation_video.backend=='localisation'

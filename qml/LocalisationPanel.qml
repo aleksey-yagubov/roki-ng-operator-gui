@@ -8,7 +8,7 @@ ScrollView {
     clip: true
     contentWidth: availableWidth
     property var kddockwidgets_min_size: Qt.size(580, 320)
-    onVisibleChanged: if (!visible) localisation.watch(false)
+    onVisibleChanged: localisation.watch(visible)
     ColumnLayout {
     width: root.availableWidth
     Flow {
