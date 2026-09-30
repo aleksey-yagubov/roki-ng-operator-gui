@@ -286,6 +286,10 @@ class Video(QObject):
             elif op in ("video.start", "video.status"):
                 self.phase = result.get("state", "unknown")
                 self.timer.start()
+                if result.get('state') == 'stopped':
+                    self.local_error('Поток остановлен на роботе. Проверьте камеру и локализацию, затем запустите видео снова.')
+                    self.stop()
+                    return
                 if result.get("error"):
                     self.local_error(result["error"])
         if self.cancelled and self.info:

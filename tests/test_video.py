@@ -62,6 +62,16 @@ class VideoTests(unittest.TestCase):
         return video
 
 
+    def test_remote_stop_releases_stream_and_explains_frozen_image(self):
+        video=self.manual()
+        video.startLocalisation()
+        wait_until(lambda:video.phase=='running')
+        video.response('video.status',dict(video.info,state='stopped'),'video')
+        wait_until(lambda:not video.info and not video.pending)
+        self.assertTrue(video.view['canStart'])
+        self.assertIn('остановлен на роботе',video.error)
+        self.assertFalse(video.timer.isActive())
+
     def test_localisation_video_uses_stream_worker_source(self):
         video=self.manual()
         video.startLocalisation()
