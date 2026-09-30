@@ -117,6 +117,8 @@ class DataSources(QObject):
 
     @Slot(str, object, str)
     def response(self, op, body, topic):
+        if topic.startswith("head-state:"):
+            return
         if not op.startswith("data."):
             return
         self.pending.discard((op, topic))
@@ -173,6 +175,8 @@ class DataSources(QObject):
 
     @Slot(str, str, str)
     def failed(self, op, message, topic):
+        if topic.startswith("head-state:"):
+            return
         if op.startswith("data."):
             self.pending.discard((op, topic))
             self.error = f"{op}: {message}"

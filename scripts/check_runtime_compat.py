@@ -79,6 +79,18 @@ def main():
                 c.pose("base_stand")
                 wait_until(lambda: c.job.get("status") == "completed", 12000)
                 assert not c.error, c.error
+                c.driveSettings(0.5, "centered", True)
+                manual_jobs = []
+                for action in (c.getUp, lambda: c.splits("small"), lambda: c.pose("crouch"),
+                               lambda: c.splits("big"), lambda: c.pose("crouch"),
+                               lambda: c.jump("turn_left")):
+                    previous = c.job.get("job_id")
+                    action()
+                    wait_until(lambda: c.job.get("job_id") != previous and not c.pending)
+                    wait_until(lambda: c.job.get("status") in ("completed", "failed", "cancelled"), 15000)
+                    assert c.job["status"] == "completed", c.job
+                    manual_jobs.append(dict(c.job))
+                result["manual_jobs"] = manual_jobs
                 c.head(100, -500)
                 wait_until(lambda: c.pan == 100 and c.tilt == -500)
                 c.hold("forward", True)
