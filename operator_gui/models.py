@@ -1,6 +1,7 @@
 """Small bounded Qt models; no robot operations in view code."""
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QSortFilterProxyModel, Qt, Slot
+from PySide6.QtGui import QGuiApplication
 
 ENTRY = Qt.ItemDataRole.UserRole + 1
 LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
@@ -69,6 +70,18 @@ class LogFilter(QSortFilterProxyModel):
         self.level = 10
         self.search = ""
         self.source = ""
+
+    @Slot(result=str)
+    def text(self):
+        lines = []
+        for row in range(self.rowCount()):
+            item = self.data(self.index(row, 0), ENTRY)
+            lines.append(f"{item['time']} [{item['level']}] {item['source']}: {item['message']}")
+        return "\n".join(lines)
+
+    @Slot()
+    def copyAll(self):
+        QGuiApplication.clipboard().setText(self.text())
 
     @Slot(str, str, str)
     def configure(self, level, search, source):
