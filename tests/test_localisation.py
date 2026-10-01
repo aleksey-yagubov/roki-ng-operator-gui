@@ -15,6 +15,7 @@ class Session(QObject):
 
 
 class Control:
+    mode='MANUAL'
     error='Нет управления'
     def __init__(self):self.commands=[];self.allow=True
     def command(self,*args,**kw):self.commands.append((args,kw));return self.allow

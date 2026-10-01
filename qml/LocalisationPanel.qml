@@ -29,7 +29,7 @@ ScrollView {
         Button {
             objectName: "localisationStart"
             text: "Запустить с этой позой"
-            enabled: localisation.view.available && !localisation.view.running && controls.view.manual && !controls.view.pending
+            enabled: localisation.view.available && !localisation.view.running && controls.view.owns && (controls.view.manual || controls.view.mode === "GAME") && !controls.view.pending
             onClicked: localisation.start(Number(priorX.text.replace(",", ".")), Number(priorY.text.replace(",", ".")), Number(priorYaw.text.replace(",", ".")))
         }
         Button { objectName: "localisationStop"; text: "Остановить локализацию"; enabled: localisation.view.available && controls.view.owns && !controls.view.pending; onClicked: localisation.stop() }

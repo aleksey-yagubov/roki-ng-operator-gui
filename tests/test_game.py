@@ -55,6 +55,17 @@ class GameTests(unittest.TestCase):
         self.assertFalse(self.game.view['canStop'])
         self.assertIsNone(self.robot.owner)
 
+    def test_game_hint_explains_status_instead_of_manual_tests(self):
+        self.connect()
+        self.assertIn('Запросить статус', self.game.view['blockedReason'])
+        self.game.refresh()
+        wait_until(lambda: self.game.view['fresh'])
+        hint = self.game.view['blockedReason']
+        self.assertIn('уже запущено', hint)
+        self.assertIn('Остановить игру', hint)
+        self.assertNotIn('слот', hint)
+        self.assertNotIn('ручной режим', hint)
+
     def test_observe_and_physical_start_stop_keep_lease_and_unblock_manual(self):
         self.manual()
         for observe in (True, False):

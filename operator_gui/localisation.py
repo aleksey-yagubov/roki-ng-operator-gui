@@ -106,7 +106,7 @@ class Localisation(QObject):
             self.notice = 'Введите конечные координаты и угол от −180 до 180°.'
             self.changed.emit()
             return
-        self.command('localisation.start', {'prior': [x, y, math.radians(yaw_degrees)]})
+        self.command('localisation.start', {'prior': [x, y, math.radians(yaw_degrees)]}, manual=self.control.mode != 'GAME')
 
     @Slot()
     def stop(self):

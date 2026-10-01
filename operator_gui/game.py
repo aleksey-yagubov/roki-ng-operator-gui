@@ -34,6 +34,15 @@ class Game(QObject):
         can_prepare = (self.control.owns and self.control.mode == 'IDLE'
                        and not self.control.pending and not self.control.uncertain
                        and not self.control.moving and not self.control.held)
+        blocked = self.control.blocked_reason
+        if self.session.connected and self.control.mode == 'GAME':
+            if fresh and self.state.get('running'):
+                mode = 'Наблюдение уже запущено' if self.state.get('observe_only') else 'Игра с движениями уже запущена'
+                blocked = mode + '. Для нового запуска сначала нажмите «Остановить игру».'
+                if not self.control.owns:
+                    blocked += ' Для остановки получите управление.'
+            else:
+                blocked = 'Робот в режиме GAME. Нажмите «Запросить статус», чтобы узнать состояние игры.'
         return dict(running=self.state.get('running') is True, fresh=fresh,
                     state=self.state.get('state', 'Статус не запрошен'),
                     observeOnly=self.state.get('observe_only', True),
@@ -46,7 +55,7 @@ class Game(QObject):
                     canObserve=(can_prepare or not self.control.blocked_reason)
                         and not self.state.get('running', False) and self.prepared_start is None,
                     canStop=self.control.owns and self.control.pending != 'game.stop',
-                    blockedReason=self.control.blocked_reason)
+                    blockedReason=blocked)
 
     @Slot(bool, float)
     def start(self, observe_only=True, delay_seconds=0.):

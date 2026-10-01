@@ -121,6 +121,7 @@ class Streams(QObject):
         self.serial = 0
         self.error = ""
         self.last_created = ""
+        self.ball_stream = ""
         self.capabilities = {}
         self.watching = False
         self.create_unknown = False
@@ -136,7 +137,7 @@ class Streams(QObject):
 
     @Property("QVariantMap", notify=changed)
     def view(self):
-        return dict(sources=self.sources, streams=self.streams,
+        return dict(ballStream=self.ball_stream, sources=self.sources, streams=self.streams,
                     active=[dict(id=k, label=f"{p.backend} · {k}") for k, p in self.players.items()
                             if p.phase == "receiving"],
                     busyKeys=[p[0] for p in self.pending.values()], error=self.error,
@@ -231,6 +232,24 @@ class Streams(QObject):
         # Explicit operator acknowledgement; never silently create a duplicate.
         self.create_unknown = False
         self.changed.emit()
+
+    @Slot(int)
+    def showBall(self, port):
+        if not self.permitted() or self.busy('create') or self.create_unknown:
+            return
+        if self.ball_stream:
+            self.connectStream(self.ball_stream, port, 'avdec_h264', True)
+            return
+        def created(result):
+            self.ball_stream = result['stream_id']
+            self.remember(result)
+            self.connectStream(self.ball_stream, port, 'avdec_h264', True)
+        def failed(reason):
+            self.create_unknown = 'outcome unknown' in reason
+            self.problem(reason)
+        self.request('videostream.create', dict(source='ball', output=dict(width=800, height=650, fps=30),
+                     codec=dict(name='h264', bitrate=2000000), max_fps=15,
+                     lease_epoch=self.control.lease), 'create', created, failed)
 
     def remember(self, result):
         ident = result["stream_id"]
@@ -440,6 +459,8 @@ class Streams(QObject):
         self.changed.emit()
 
     def connection(self):
+        if not self.session.connected:
+            self.ball_stream = ''
         if not self.session.connected:
             self.pending.clear()
             self.sources, self.streams, self.details = [], [], {}

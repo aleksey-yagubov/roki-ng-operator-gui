@@ -22,6 +22,8 @@ def main():
         backend = Controller('127.0.0.1', robot.port, Path(directory))
         engine = QQmlApplicationEngine()
         engine.rootContext().setContextProperty('game', backend.game)
+        engine.rootContext().setContextProperty('streams', backend.streams)
+        engine.rootContext().setContextProperty('localisation', backend.localisation)
         warnings = []
         engine.warnings.connect(lambda messages: warnings.extend(str(m) for m in messages))
         engine.load(QUrl.fromLocalFile(str(ROOT/'qml/GamePanel.qml')))
