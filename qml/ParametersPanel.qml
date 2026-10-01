@@ -100,7 +100,7 @@ ColumnLayout {
                 Button { text: "Вернуть стандартное"; enabled: editor.enabled && backend.parameter.default !== undefined; onClicked: backend.saveParameter(backend.view.paramKey,backend.parameter.default) }
             }
             Label { visible: !controls.view.owns; text: "Для записи нажмите «Получить управление» в верхней панели."; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { text: controls.view.error; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            SelectableLabel { text: controls.view.error; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
             RawDetails { objectName: "parameterDetails"; text: backend.view.paramText }
         }
     }

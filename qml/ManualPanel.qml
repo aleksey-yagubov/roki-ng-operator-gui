@@ -175,6 +175,6 @@ ScrollView {
             }
         }
         Label { text: controls.view.jobOperation + " · " + controls.view.jobStatus + " " + controls.view.jobProgress; Layout.fillWidth: true; wrapMode: Text.Wrap }
-        Label { text: controls.view.jobReason || controls.view.error; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        SelectableLabel { text: controls.view.jobReason || controls.view.error; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
     }
 }

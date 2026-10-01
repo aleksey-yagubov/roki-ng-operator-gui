@@ -38,7 +38,7 @@ ScrollView {
         Label { text: !controls.view.manual ? "Для старта нужны управление и MANUAL." : ""; visible: text.length > 0; wrapMode: Text.Wrap; Layout.fillWidth: true }
         Label { objectName: "cameraState"; text: (camera.view.state.running ? "Камера работает" : "Захват не подтверждён") + " · IMU: " + (camera.view.state.imu_sync?.state ?? "нет данных") + " · кадр: " + (camera.view.state.sequence ?? "—"); Layout.fillWidth: true; wrapMode: Text.Wrap }
         Label { text: "Точное сопоставление IMU готово только при synced. Aligning не означает остановку кадров."; wrapMode: Text.Wrap; Layout.fillWidth: true }
-        Label { text: camera.view.state.error || camera.view.notice; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        SelectableLabel { text: camera.view.state.error || camera.view.notice; wrapMode: Text.Wrap; Layout.fillWidth: true }
         Label { text: "ISP · запрошенные значения и черновик"; font.bold: true }
         Repeater {
             model: camera.keys

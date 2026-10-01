@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from shiboken6 import delete
-from PySide6.QtCore import QObject, QUrl
+from PySide6.QtCore import QObject, QUrl, QMetaObject
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from operator_gui.controller import Controller
@@ -29,6 +29,11 @@ def main():
             assert engine.rootObjects(), warnings
             panel = engine.rootObjects()[0]
             item = lambda name: panel.findChild(QObject, name)
+            status = item('gameState')
+            assert status.property('readOnly') and status.property('selectByMouse')
+            QMetaObject.invokeMethod(status, 'selectAll')
+            QMetaObject.invokeMethod(status, 'copy')
+            assert app.clipboard().text() == status.property('text')
             assert not item('gameObserve').property('enabled')
             assert not item('gamePhysicalStart').property('enabled')
             assert not item('gameStop').property('enabled')

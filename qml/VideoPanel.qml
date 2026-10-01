@@ -45,7 +45,7 @@ ScrollView {
             Button { objectName: "videoCatalogButton"; text: "Запросить источники и передачи"; enabled: backend.view.connected && !streams.view.catalogBusy; onClicked: streams.refresh() }
             Button { objectName: "addVideoView"; text: "+ Просмотр"; onClicked: videoViews.add(root.reception.active ? root.selected : "") }
         }
-        Label { text: streams.view.error; visible: text.length > 0; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        SelectableLabel { text: streams.view.error; visible: text.length > 0; Layout.fillWidth: true; wrapMode: Text.Wrap }
         GroupBox {
             title: "Новое определение передачи"
             Layout.fillWidth: true
@@ -128,7 +128,7 @@ ScrollView {
                     Button { objectName: "videoDetachButton"; text: "Отключить мой приёмник"; enabled: backend.view.connected && !!root.selected && !root.busy; onClicked: streams.detach(root.selected) }
                     Button { text: "Статус"; enabled: backend.view.connected && !!root.selected && !root.busy; onClicked: streams.inspect(root.selected) }
                 }
-                Label { text: root.reception.error || ("Приём: " + root.reception.phase + " · " + (root.reception.fps ?? "—") + " FPS"); Layout.fillWidth: true; wrapMode: Text.Wrap }
+                SelectableLabel { text: root.reception.error || ("Приём: " + root.reception.phase + " · " + (root.reception.fps ?? "—") + " FPS"); Layout.fillWidth: true; wrapMode: Text.Wrap }
                 Flow {
                     Layout.fillWidth: true; spacing: 6
                     Button { objectName: "streamStop"; text: "Остановить для всех"; enabled: streams.view.canManage && !!root.selected && !root.busy; onClicked: streams.manage(root.selected, "stop") }

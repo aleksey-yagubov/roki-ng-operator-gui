@@ -16,7 +16,7 @@ ScrollView {
         Button { objectName: "localisationRefresh"; text: "Обновить"; enabled: localisation.view.available && !localisation.view.pending; onClicked: localisation.refresh() }
         CheckBox { text: "Обновлять 2 раза/с"; enabled: localisation.view.available; checked: localisation.view.watching; onToggled: localisation.watch(checked) }
     }
-    Label { objectName: "localisationNotice"; text: localisation.view.notice; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    SelectableLabel { objectName: "localisationNotice"; text: localisation.view.notice; wrapMode: Text.Wrap; Layout.fillWidth: true }
     RowLayout {
         Label { text: "Старт X, м" }
         TextField { id: priorX; objectName: "localisationPriorX"; text: "0"; Layout.preferredWidth: 65; selectByMouse: true }
@@ -34,8 +34,8 @@ ScrollView {
         }
         Button { objectName: "localisationStop"; text: "Остановить локализацию"; enabled: localisation.view.available && controls.view.owns && !controls.view.pending; onClicked: localisation.stop() }
     }
-    Label { objectName: "localisationStatus"; text: localisation.view.status; font.bold: true; Layout.fillWidth: true; wrapMode: Text.Wrap }
-    Label { text: localisation.view.error; visible: text.length > 0; color: "#b03030"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    SelectableLabel { objectName: "localisationStatus"; text: localisation.view.status; font.bold: true; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    SelectableLabel { text: localisation.view.error; visible: text.length > 0; color: "#b03030"; Layout.fillWidth: true; wrapMode: Text.Wrap }
     Label { text:"Захват с IMU запускается в «Камере». Для обработанного видео выберите источник localisation в «Стримах», затем добавьте просмотр."; wrapMode:Text.Wrap; Layout.fillWidth:true }
     Label { objectName:"localisationProblems"; text:localisation.view.problems; visible:text.length>0; wrapMode:Text.Wrap; Layout.fillWidth:true }
     Canvas {

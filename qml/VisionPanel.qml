@@ -19,8 +19,8 @@ ScrollView {
             Button {text:"Статус детектора";enabled:backend.view.connected && !visionTuning.view.busy;onClicked:visionTuning.status()}
             CheckBox {id:watching;text:"Обновлять статус";onToggled:visionTuning.watch(checked && root.visible)}
         }
-        Label {text:visionTuning.view.notice;Layout.fillWidth:true;wrapMode:Text.Wrap}
-        Label {text:controls.view.error;visible:text!=="";Layout.fillWidth:true;wrapMode:Text.Wrap}
+        SelectableLabel {text:visionTuning.view.notice;Layout.fillWidth:true;wrapMode:Text.Wrap}
+        SelectableLabel {text:controls.view.error;visible:text!=="";Layout.fillWidth:true;wrapMode:Text.Wrap}
         Label {text:"Камера и ISP настраиваются в панели «Камера». Видео запрашивается отдельно в «Стримах».";Layout.fillWidth:true;wrapMode:Text.Wrap}
         ComboBox {
             id:previewStream
