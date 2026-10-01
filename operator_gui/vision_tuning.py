@@ -75,7 +75,8 @@ class VisionTuning(QObject):
         self.metas={};self.values={}
         self.catalog_dirty=True
         self.queue=[('detection.list',{},'tuning:profiles')]
-        for prefix in ('vision.','camera.'):
+        self.queue.append(('camera.controls.list',{'offset':0,'limit':2},'tuning:controls'))
+        for prefix in ('vision.',):
             self.queue.append(('params.keys',{'prefix':prefix,'limit':8},'tuning:keys:'+prefix))
         self.next()
 
@@ -109,14 +110,22 @@ class VisionTuning(QObject):
             if op=='params.describe':self.metas[result['key']]=result
             elif 'values' in result:self.values.update(result['values'])
             else:self.values[result['key']]=result['value']
+        elif context=='tuning:controls':
+            for item in result['items']:
+                self.metas[item['key']]=item
+                self.values[item['key']]=item['value']
+            if result.get('next_offset') is not None:
+                self.queue.insert(0,('camera.controls.list',{'offset':result['next_offset'],'limit':2},context))
+        elif context=='tuning:apply':
+            self.notice='Применено временно. Для сохранения после перезапуска нажмите «Сохранить камеру».'
+            self.changed.emit();return
         elif context=='tuning:save':
             self.values.update(result['values'])
             for key in result['values']:self.drafts.pop(key,None)
             self.notice='Настройки сохранены на роботе.';self.recompute();self.changed.emit();return
         elif context=='tuning:freeze':
-            self.values.update(result['values'])
-            for key in result['values']:self.drafts.pop(key,None)
-            self.notice=f"Автоматика зафиксирована по кадру {result['source_sequence']}.";self.changed.emit();return
+            self.drafts.update(result['values'])
+            self.notice=f"Автоматика зафиксирована по кадру {result['source_sequence']}; нажмите Сохранить для записи на роботе.";self.changed.emit();return
         elif context=='tuning:status':
             if op=='camera.status':self.camera=result
             else:self.detector=result
@@ -154,8 +163,17 @@ class VisionTuning(QObject):
         if self.busy:return
         keys=[k for k in self.keys(scope) if k in self.drafts]
         if not keys:return
+        if scope=='camera':
+            self.control.command('camera.controls.save',{'values':{k:self.drafts[k] for k in keys}},manual=False,job=False,context='tuning:save')
+            return
         self.control.command('params.set',{'values':{k:self.drafts[k] for k in keys},
             'expected_values':{k:self.values[k] for k in keys}},manual=False,job=False,context='tuning:save')
+
+    @Slot()
+    def applyCamera(self):
+        if self.busy:return
+        values={k:self.drafts[k] for k in self.keys('camera') if k in self.drafts}
+        if values:self.control.command('camera.controls.set',{'values':values},manual=False,job=False,context='tuning:apply')
 
     @Slot(str)
     def freeze(self,group):
@@ -166,7 +184,7 @@ class VisionTuning(QObject):
     @Slot(str)
     def action(self,op):
         if op not in ('camera.start','camera.stop','detection.start','detection.stop'):return
-        args={'with_imu':False} if op=='camera.start' else {'profile':self.profile} if op=='detection.start' else {}
+        args={'profile':self.profile} if op=='detection.start' else {}
         sent=self.control.command(op,args,manual=op.endswith('.start'),job=False,context='tuning:action')
         if not sent:
             self.notice=self.control.error;self.changed.emit()

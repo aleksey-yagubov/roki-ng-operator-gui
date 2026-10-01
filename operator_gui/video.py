@@ -29,9 +29,10 @@ def video_request(values):
     if codec == "h264":
         encoding["bitrate"] = integer("bitrate", 100000, 20000000)
     if backend in ('runtime','localisation') and (width>800 or height>650):raise ValueError('Runtime: максимум 800×650')
-    result=dict(backend=backend,
+    integer("port", 1024, 65535)
+    result=dict(source=backend,
                 output=dict(width=width, height=height, fps=scalar({"type": "float", "min": 1, "max": 120}, values["fps"])),
-                codec=encoding, destination=dict(rtp_port=integer("port", 1024, 65535)), mtu=1400)
+                codec=encoding, mtu=1400)
     if backend=='direct-gst':result['sensor']=dict(width=sw,height=sh,depth=depth)
     return result
 
@@ -64,6 +65,11 @@ class Video(QObject):
         self.image_serial = 0
         self.last_image_at = 0.
         self.backend = 'direct-gst'
+        self.port = 5004
+        self.observing = False
+        self.sources = []
+        self.streams = []
+        self.catalog_pending = set()
         session.response.connect(self.response)
         session.failed.connect(self.failed)
         session.changed.connect(self.connection)
@@ -89,9 +95,11 @@ class Video(QObject):
                    + f"выход {output.get('width', '?')}x{output.get('height', '?')}, {output.get('fps', '?')} FPS."
                    if self.capabilities else "Возможности ещё не запрошены.")
         return dict(phase=self.phase, error=self.error, pending=self.pending,backend=self.backend,
+                    sources=self.sources, streams=self.streams,
+                    catalogBusy=bool(self.catalog_pending),
                     canStart=not reason, startBlockedReason=reason,
                     canEditSettings=not self.info and not self.local_busy and not self.unknown_create
-                    and self.pending in ("", "video.capabilities"),
+                    and self.pending in ("", "videostream.capabilities"),
                     capabilitiesSummary=summary,
                     canStop=bool(self.info or self.pending or self.local_busy),
                     streamId=self.info.get("stream_id", ""),
@@ -108,8 +116,6 @@ class Video(QObject):
             return "Нажмите «Получить управление» в верхней панели."
         if self.control.pending:
             return "Ожидается ответ: " + self.control.pending
-        if self.control.mode != "MANUAL":
-            return "Для запуска видео включите ручной режим (MANUAL)."
         if self.unknown_create:
             return "Исход создания потока неизвестен. Переподключитесь для очистки сессии."
         if self.pending:
@@ -141,7 +147,53 @@ class Video(QObject):
     @Slot()
     def getCapabilities(self):
         if self.session.connected and not self.pending:
-            self.request("video.capabilities")
+            self.request("videostream.capabilities")
+
+    @Slot()
+    def getCatalogs(self):
+        if not self.session.connected or self.catalog_pending:
+            return
+        self.sources, self.streams = [], []
+        for kind, limit in (("sources", 1), ("list", 4)):
+            self.catalog_pending.add(kind)
+            self.session.request("videostream." + kind, {"offset": 0, "limit": limit}, self.context + ":" + kind)
+        self.changed.emit()
+
+    @Slot(str, int, str)
+    def watchStream(self, stream_id, port, decoder):
+        if not self.session.connected or self.pending or self.info or self.local_busy:
+            return
+        if not 1024 <= port <= 65535:
+            self.local_error("Некорректный UDP-порт")
+            return
+        self.observing = True
+        self.cancelled = False
+        self.port, self.decoder = port, decoder
+        self.phase = "inspecting"
+        self.request("videostream.status", {"stream_id": stream_id})
+
+    @Slot(str, int, str)
+    def restartStream(self, stream_id, port, decoder):
+        if not self.control.owns or self.control.pending:
+            return
+        self.watchStream(stream_id, port, decoder)
+        if self.phase == 'inspecting':
+            self.observing = False
+
+    @Slot(str)
+    def destroyStream(self, stream_id):
+        if self.control.owns and not self.pending and not self.info:
+            self.request('videostream.destroy', {'stream_id':stream_id, 'lease_epoch':self.control.lease})
+
+    @Slot()
+    def stopTransmission(self):
+        if self.info and self.control.owns and not self.pending:
+            self.request("videostream.stop", {"stream_id": self.info["stream_id"], "lease_epoch": self.control.lease})
+
+    @Slot(float)
+    def updateFps(self, fps):
+        if self.info and self.control.owns and not self.pending:
+            self.request("videostream.update", {"stream_id": self.info["stream_id"], "max_fps": fps, "lease_epoch": self.control.lease})
 
     @Slot("QVariantMap")
     def start(self, values):
@@ -149,7 +201,9 @@ class Video(QObject):
             return
         try:
             spec = video_request(values)
-            self.backend=spec['backend']
+            self.backend=spec['source']
+            self.observing = False
+            self.port=int(values['port'])
             self.image=QImage();self.last_image_at=0.;self.image_serial+=1;self.imageChanged.emit()
             self.decoder = values["decoder"]
             from .video_receiver import receiver_description
@@ -159,7 +213,7 @@ class Video(QObject):
             self.media = {}
             self.error = ""
             self.phase = "creating"
-            self.request("video.create", dict(spec, lease_epoch=self.control.lease))
+            self.request("videostream.create", dict(spec, lease_epoch=self.control.lease))
         except Exception as exc:
             self.local_error(str(exc))
 
@@ -185,18 +239,21 @@ class Video(QObject):
             return
         try:
             self.local_busy = True
-            self.receiver.start(self.info, self.decoder, self.latency)
+            self.receiver.start(dict(self.info, rtp_port=self.port), self.decoder, self.latency)
         except Exception as exc:
             self.local_error(str(exc))
             self.receiver.stop()
 
     @Slot()
     def local_ready(self):
-        if self.cancelled or not self.session.connected or not self.control.owns:
+        if self.cancelled or not self.session.connected or (not self.observing and not self.control.owns):
             self.stop()
         else:
             self.phase = "starting"
-            self.request("video.start", dict(stream_id=self.info["stream_id"], lease_epoch=self.control.lease))
+            body = dict(stream_id=self.info["stream_id"], rtp_port=self.port)
+            if not self.observing:
+                body['lease_epoch'] = self.control.lease
+            self.request("videostream.attach" if self.observing else "videostream.start", body)
 
     @Slot()
     def stop(self):
@@ -205,7 +262,7 @@ class Video(QObject):
         self.receiver.stop()
         if self.info and not self.pending and self.session.connected:
             self.phase = "stopping"
-            self.request("video.destroy", {"stream_id": self.info["stream_id"]})
+            self.request("videostream.detach", {"stream_id": self.info["stream_id"]})
         elif not self.info and not self.pending:
             self.phase = "idle"
         self.changed.emit()
@@ -220,8 +277,7 @@ class Video(QObject):
 
     @Slot()
     def closeWindow(self):
-        self.hide_on_stop = True
-        self.stop()
+        self.hideWindow.emit()
 
     @Slot(str)
     def media_error(self, message):
@@ -243,31 +299,54 @@ class Video(QObject):
     @Slot()
     def refresh(self):
         if self.info and not self.pending and self.session.connected:
-            self.request("video.status", {"stream_id": self.info["stream_id"]})
+            self.request("videostream.status", {"stream_id": self.info["stream_id"]})
 
     @Slot(str, object, str)
     def response(self, op, result, context):
+        if context in (self.context + ":sources", self.context + ":list"):
+            kind = context.split(":")[-1]
+            target = self.sources if kind == "sources" else self.streams
+            target.extend(result['items'])
+            if result.get('next_offset') is not None:
+                self.session.request(op, {'offset': result['next_offset'], 'limit': 1 if kind == 'sources' else 4}, context)
+            else:
+                self.catalog_pending.discard(kind)
+            self.changed.emit()
+            return
         if context != self.context:
             return
         self.pending = ""
-        if op == "video.capabilities":
+        if op == "videostream.capabilities":
             self.capabilities = result
             self.log("INFO", "Получены возможности видео: " + self.view["capabilitiesSummary"])
-        elif op == "video.destroy":
+        elif op in ("videostream.detach", "videostream.destroy"):
             self.info = {}
             self.phase = "idle"
             self.timer.stop()
         else:
+            previous_run = self.info.get('run_id')
+            inspecting = self.phase == 'inspecting'
             self.info = result
-            if op == "video.create" and not self.cancelled:
+            if inspecting and self.observing and result.get('state') not in ('starting', 'running'):
+                self.info = {}
+                self.local_error('Передача не запущена. Наблюдатель может подключиться только к активной передаче.')
+                return
+            if (op == "videostream.create" or inspecting) and not self.cancelled:
+                if not self.observing and result.get('state') not in ('starting', 'running'):
+                    self.info = dict(result, ssrc=None, run_id=None)
+                self.backend = result['spec']['source']
                 self.phase = "receiver"
                 self.showWindow.emit()
                 if self.item and not self.local_busy:
                     self.attach(self.item)
-            elif op in ("video.start", "video.status"):
+            elif op in ("videostream.start", "videostream.attach", "videostream.status", "videostream.stop", "videostream.update"):
                 self.phase = result.get("state", "unknown")
                 self.timer.start()
-                if result.get('state') == 'stopped':
+                if previous_run and result.get('run_id') != previous_run and op == 'videostream.status':
+                    self.local_error('Передача перезапущена. Подключитесь заново для очистки очереди видео.')
+                    self.stop()
+                    return
+                if result.get('state') in ('stopped', 'failed'):
                     self.local_error('Поток остановлен на роботе. Проверьте камеру и локализацию, затем запустите видео снова.')
                     self.stop()
                     return
@@ -279,6 +358,10 @@ class Video(QObject):
 
     @Slot(str, str, str)
     def failed(self, op, reason, context):
+        if context in (self.context + ":sources", self.context + ":list"):
+            self.catalog_pending.discard(context.split(":")[-1])
+            self.local_error(reason)
+            return
         if context != self.context:
             return
         self.pending = ""
@@ -286,14 +369,15 @@ class Video(QObject):
         # Do not blindly retry an ambiguous mutation with a new ID.
         self.timer.stop()
         self.receiver.stop()
-        if op == "video.create":
+        if op == "videostream.create":
             self.unknown_create = "timeout" in reason.lower()
-            self.error += " Если ответ потерян, закройте сессию для удаления неизвестного stream_id."
+            self.error += " Если ответ потерян, проверьте список передач: определение может сохраниться."
         self.changed.emit()
 
     @Slot()
     def connection(self):
         if not self.session.connected:
+            self.catalog_pending.clear()
             self.cancelled = True
             self.pending = ""
             self.info = {}
@@ -306,7 +390,13 @@ class Video(QObject):
     @Slot()
     def barrier(self):
         if self.pending:
-            if self.pending == "video.create":
+            if self.pending not in ('videostream.create', 'videostream.start'):
+                self.pending = ''
+                if self.info:
+                    self.timer.start()
+                self.changed.emit()
+                return
+            if self.pending == "videostream.create":
                 self.unknown_create = True
             self.pending = ""
             self.local_error("Запрос видео прерван командой управления; проверьте статус или остановите видео.")

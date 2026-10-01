@@ -78,7 +78,7 @@ def main():
         field.addMark();field.place(.5,-.3);field.save();wait(lambda:not field.drafts)
         assert Parameters(directory).values['field.mark.00']['x']==.5
         assert not session.errors,session.errors
-        print(f'PASS: {session.requests} requests, largest datagram {session.largest}/1200 bytes; hardware mocked')
+        print(f'PASS: {session.requests} requests, largest datagram {session.largest}/1400 bytes; hardware mocked')
 
 
 if __name__=='__main__':main()

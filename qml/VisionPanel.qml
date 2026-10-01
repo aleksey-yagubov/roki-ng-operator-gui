@@ -124,7 +124,7 @@ ScrollView {
                     property var entry:({meta:visionTuning.view.metas[modelData] || {},value:visionTuning.view.values[modelData]})
                     Layout.fillWidth:true
                     Label {text:root.labels[cameraRow.modelData] || cameraRow.modelData;Layout.preferredWidth:180}
-                    ValueEditor {Layout.fillWidth:true;meta:cameraRow.entry.meta;initialValue:cameraRow.entry.value;onEdited:value => visionTuning.edit(cameraRow.modelData,value)}
+                    ValueEditor {Layout.fillWidth:true;enabled:cameraRow.entry.meta.supported !== false;meta:cameraRow.entry.meta;initialValue:cameraRow.entry.value;onEdited:value => visionTuning.edit(cameraRow.modelData,value)}
                 }
             }
             Label {text:"Ручные значения при включённой автоматике сохраняются, но не являются её измеренным результатом. Изменения применяются после сохранения без перезапуска runtime-камеры.";Layout.fillWidth:true;wrapMode:Text.Wrap}
@@ -132,6 +132,7 @@ ScrollView {
                 Layout.fillWidth:true;spacing:6
                 Button {text:"Стандартная камера";enabled:!visionTuning.view.busy && visionTuning.view.cameraRows.length>0;onClicked:visionTuning.defaults("camera")}
                 Button {text:"Сохранить камеру";enabled:controls.view.owns && !controls.view.pending && !visionTuning.view.busy;onClicked:visionTuning.save("camera")}
+                Button {text:"Применить временно";enabled:controls.view.owns && !controls.view.pending && !visionTuning.view.busy;onClicked:visionTuning.applyCamera()}
                 Button {text:"Зафиксировать экспозицию";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.freeze("exposure")}
                 Button {text:"Зафиксировать баланс белого";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.freeze("white_balance")}
             }

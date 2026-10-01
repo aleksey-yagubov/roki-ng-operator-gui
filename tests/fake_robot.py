@@ -47,7 +47,7 @@ class FakeRobot:
 
     def _send(self, packet, address=None):
         raw = msgpack.packb(packet, use_bin_type=True)
-        assert len(raw) <= 1200, len(raw)
+        assert len(raw) <= 1400, len(raw)
         self.sock.sendto(raw, address or self.client)
 
     def send_log(self, message="camera ready", level="INFO", skip=0):
@@ -75,7 +75,7 @@ class FakeRobot:
     def _run(self):
         while not self.stop_event.is_set():
             try:
-                raw, address = self.sock.recvfrom(1201)
+                raw, address = self.sock.recvfrom(1401)
             except socket.timeout:
                 continue
             try:
@@ -91,7 +91,7 @@ class FakeRobot:
                 if op == "hello":
                     body = dict(robot_id="LOCAL-TEST", boot_id="fake-boot", heartbeat_ms=500,
                                 session_timeout_ms=2000, drive_timeout_ms=350, state="GAME",
-                                capabilities_revision="manual-1", max_datagram=1200)
+                                capabilities_revision="manual-1", max_datagram=1400)
                     self._send(envelope("welcome", "hello", body, ident, self.session, self.token), address)
                     continue
                 assert message["session"] == self.session and message["token"] == self.token
@@ -136,23 +136,39 @@ class FakeRobot:
                         result=dict(candidate=[-1.2,-.8,.4],valid=False,fit_state=getattr(self,'localisation_fit','weak'),
                                     lines=5,circle=True,inlier_fraction=.4,median_residual_m=.15,
                                     frame_sequence=123) if self.localisation_running else None)
-        if op == "video.capabilities":
+        if op == "videostream.sources":
+            items=[dict(id=k,available=False,reason="camera_stopped") for k in ("direct-gst","runtime","localisation")]
+            start=body.get("offset",0);limit=body.get("limit",1)
+            return dict(items=items[start:start+limit],next_offset=start+limit if start+limit<len(items) else None)
+        if op == "videostream.list":
+            items=[dict(stream_id=k,source=v["spec"]["source"],state=v["state"]) for k,v in self.streams.items()]
+            start=body.get("offset",0);limit=body.get("limit",4)
+            return dict(items=items[start:start+limit],next_offset=start+limit if start+limit<len(items) else None)
+        if op == "videostream.capabilities":
             return dict(backends=["direct-gst"], codecs=["h264", "jpeg"])
-        if op == "video.create":
+        if op == "videostream.create":
             assert self.owner == self.session and self.mode == "MANUAL"
+            assert "destination" not in body and "backend" not in body
             ident = str(len(self.streams) + 1)
             jpeg = body["codec"]["name"] == "jpeg"
-            self.streams[ident] = dict(stream_id=ident, spec=body, state="created", ssrc=1234,
+            self.streams[ident] = dict(stream_id=ident, spec=body, state="created", ssrc=None, run_id=None, attached=False, receivers=0,
                                       payload_type=26 if jpeg else 96, clock_rate=90000,
                                       encoding_name="JPEG" if jpeg else "H264")
             return self.streams[ident].copy()
-        if op == "video.start":
-            assert body["lease_epoch"] == self.lease
-            self.streams[body["stream_id"]]["state"] = "running"
+        if op in ("videostream.start", "videostream.attach"):
+            if op == "videostream.attach":
+                assert self.streams[body["stream_id"]]["state"] in ("starting", "running")
+            else:
+                assert body["lease_epoch"] == self.lease
+            self.streams[body["stream_id"]].update(state="running", ssrc=1234, run_id="run1", attached=True, receivers=1, destination=["127.0.0.1",body["rtp_port"]])
             return self.streams[body["stream_id"]].copy()
-        if op == "video.status":
+        if op == "videostream.detach":
+            stream=self.streams[body["stream_id"]]
+            stream.update(state="stopped", attached=False, receivers=0)
+            return stream.copy()
+        if op == "videostream.status":
             return self.streams[body["stream_id"]].copy()
-        if op == "video.destroy":
+        if op == "videostream.destroy":
             self.streams.pop(body["stream_id"], None)
             return dict(stream_id=body["stream_id"], state="destroyed")
         if op == "data.list":

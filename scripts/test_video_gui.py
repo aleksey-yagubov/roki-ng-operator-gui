@@ -32,16 +32,16 @@ class MediaRobot(FakeRobot):
 
     def _result(self, op, body):
         result = super()._result(op, body)
-        if op == "video.start":
+        if op == "videostream.start":
             spec = result["spec"]
             jpeg = spec["codec"]["name"] == "jpeg"
             encode = ("jpegenc ! rtpjpegpay pt=26" if jpeg else
-                      "openh264enc bitrate=2000000 gop-size=30 ! rtph264pay pt=96 config-interval=1")
+                      "x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30 ! rtph264pay pt=96 config-interval=1")
             launch = ("videotestsrc is-live=true pattern=smpte ! video/x-raw,format=I420,width=800,height=648,framerate=30/1 "
-                      f"! {encode} ssrc=1234 ! udpsink host=127.0.0.1 port={spec['destination']['rtp_port']} sync=false")
+                      f"! {encode} ssrc=1234 ! udpsink host=127.0.0.1 port={body['rtp_port']} sync=false")
             self.pipeline = self.Gst.parse_launch(launch)
             self.pipeline.set_state(self.Gst.State.PLAYING)
-        elif op == "video.destroy" and self.pipeline:
+        elif op in ("videostream.destroy", "videostream.detach") and self.pipeline:
             self.pipeline.set_state(self.Gst.State.NULL)
             self.pipeline = None
         return result
@@ -87,8 +87,9 @@ def main():
                 video = controller.video
                 video.getCapabilities()
                 wait_until(lambda: bool(video.capabilities))
-                for codec, decoder in (("h264", "vah264dec"), ("jpeg", "vajpegdec"),
-                                       ("jpeg", "jpegdec"), ("h264", "avdec_h264")):
+                choices = (("jpeg", "jpegdec"), ("h264", "avdec_h264"))
+                if sys.platform != "darwin": choices = (("h264", "vah264dec"), ("jpeg", "vajpegdec")) + choices
+                for codec, decoder in choices:
                     video.start(dict(sensorWidth=1600, sensorHeight=1300, depth=10, width=800,
                                      height=648, fps=30, codec=codec, bitrate=2000000,
                                      port=video_port, decoder=decoder))
@@ -118,6 +119,10 @@ def main():
                     report["cycles"].append(dict(codec=codec, decoder=decoder, fps=video.view["fps"], frames=video.view["frames"], size=video.view["size"]))
                     print("PASS", report["cycles"][-1], flush=True)
                     video.closeWindow()
+                    before = video.imageSerial
+                    wait_until(lambda: video.imageSerial > before + 5)
+                    assert video.info["stream_id"] == stream_id
+                    video.stop()
                     wait_until(lambda: not video.info and not video.pending and not video.local_busy, 5000)
                     assert not image_dock.property("isOpen")
                 assert not robot.errors, robot.errors

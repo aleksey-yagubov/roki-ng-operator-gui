@@ -13,14 +13,17 @@ def receiver_description(info, decoder, latency):
     choices = {"H264": ("vah264dec", "avdec_h264"), "JPEG": ("vajpegdec", "jpegdec")}
     if codec not in choices or decoder not in choices[codec]:
         raise ValueError("Декодер не соответствует кодеку")
-    pt, ssrc = int(info["payload_type"]), int(info["ssrc"])
-    if not 0 <= pt <= 127 or not 0 <= ssrc < 2**32 or not 0 <= latency <= 1000:
+    pt = int(info["payload_type"])
+    ssrc = info.get("ssrc")
+    if ssrc is not None: ssrc = int(ssrc)
+    if not 0 <= pt <= 127 or (ssrc is not None and not 0 <= ssrc < 2**32) or not 0 <= latency <= 1000:
         raise ValueError("Некорректные параметры RTP")
+    ssrc_caps = f",ssrc=(uint){ssrc}" if ssrc is not None else ""
     depay, parse = ("rtph264depay", "h264parse") if codec == "H264" else ("rtpjpegdepay", "jpegparse")
     tail = ("videoconvert ! video/x-raw,format=RGBA ! appsink name=frames "
             "sync=false max-buffers=1 drop=true emit-signals=true")
     return (f'udpsrc name=network close-socket=false caps="application/x-rtp,media=video,'
-            f'encoding-name={codec},payload=(int){pt},clock-rate=(int)90000,ssrc=(uint){ssrc}" '
+            f'encoding-name={codec},payload=(int){pt},clock-rate=(int)90000{ssrc_caps}" '
             f'! rtpjitterbuffer latency={latency} drop-on-latency=true '
             f'! {depay} ! {parse} ! {decoder} name=decoder ! {tail}')
 
@@ -100,7 +103,7 @@ class MediaWorker(QObject):
             self.pipeline.get_by_name("frames").connect("new-sample", self.sample)
             # Own a non-reusable UDP port: another player must not steal packets.
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                sock.bind(("0.0.0.0", info["spec"]["destination"]["rtp_port"]))
+                sock.bind(("0.0.0.0", info["rtp_port"]))
                 self.socket = Gio.Socket.new_from_fd(sock.detach())
             self.pipeline.get_by_name("network").set_property("socket", self.socket)
             if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:

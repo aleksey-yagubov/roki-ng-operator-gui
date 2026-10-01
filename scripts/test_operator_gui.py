@@ -305,7 +305,7 @@ def main():
                 assert edge.x() <= window.width() and edge.y() <= window.height(), f"Clipped {name}: {edge}; window={window.width()}x{window.height()}, logs_y={item('logsList').mapToScene(QPointF(0,0)).y()}"
             snapshot("11-minimum")
             assert robot.game_running
-            assert not any(m["op"] in ("control.acquire", "mode.set", "video.start", "test.start", "motion.pose") for m in robot.requests)
+            assert not any(m["op"] in ("control.acquire", "mode.set", "videostream.start", "test.start", "motion.pose") for m in robot.requests)
             window.resize(1200, 900)
             settle(300)
             right = group.mapToScene(QPointF(group.width(), 0)).x()
@@ -390,6 +390,11 @@ def main():
             click("saveParameterButton")
             wait_until(lambda: robot.values.get("head.field_tilt") == -1200)
             snapshot("13-parameter-editor")
+            show("videoDock")
+            click("videoCatalogButton")
+            wait_until(lambda: len(backend.video.sources)==3 and not backend.video.catalog_pending)
+            assert not backend.video.info
+            snapshot("13h-video-source-catalog")
             show("fieldDock")
             backend.field_editor.values.update({'match.own_goal':0,
                 'field.goal.0':{'colour':'yellow','x':-1.675,'y':0,'width':1.},

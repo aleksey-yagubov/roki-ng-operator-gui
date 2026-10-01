@@ -28,7 +28,7 @@ for codec, decoder, encoder, payloader in (
     try:
         worker.start(dict(decoder=decoder, latency=30,
             info=dict(encoding_name=codec, payload_type=96, ssrc=1234,
-                      spec=dict(destination=dict(rtp_port=port)))))
+                      rtp_port=port)))
         if errors:
             raise RuntimeError(errors)
         sender = Gst.parse_launch(

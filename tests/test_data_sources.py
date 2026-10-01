@@ -30,7 +30,7 @@ class DataSourcesTests(unittest.TestCase):
         self.assertFalse(data.wanted)
         self.assertIsNone(self.robot.owner)
         self.assertEqual(self.robot.mode, "GAME")
-        self.assertFalse(any(m["op"].startswith(("video.", "camera.", "motion.")) for m in self.robot.requests))
+        self.assertFalse(any(m["op"].startswith(("videostream.", "camera.", "motion.")) for m in self.robot.requests))
 
     def test_subscription_gaps_rate_update_and_unsubscribe(self):
         data = self.sources()

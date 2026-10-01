@@ -10,7 +10,7 @@ import uuid
 import msgpack
 from PySide6.QtCore import QObject, QSocketNotifier, QThread, QTimer, Qt, Signal, Slot
 
-LIMIT = 1200
+LIMIT = 1400
 
 
 def envelope(kind, op, body, ident, session=0, token=0):
@@ -20,7 +20,7 @@ def envelope(kind, op, body, ident, session=0, token=0):
 
 def decode(data):
     if len(data) > LIMIT:
-        raise ValueError("Datagram exceeds 1200 bytes")
+        raise ValueError("Datagram exceeds 1400 bytes")
     value = msgpack.unpackb(data, raw=False, strict_map_key=True, max_array_len=256,
                            max_map_len=128, max_str_len=LIMIT, max_bin_len=LIMIT,
                            max_ext_len=0)
@@ -190,7 +190,7 @@ class Transport(QObject):
         self.ident += 1
         packet = msgpack.packb(envelope(kind, op, body, self.ident, self.session, self.token), use_bin_type=True)
         if len(packet) > LIMIT:
-            self.failed.emit(op, "Message exceeds 1200 bytes", context)
+            self.failed.emit(op, "Message exceeds 1400 bytes", context)
             return
         now = time.monotonic()
         self.pending[self.ident] = dict(op=op, context=context, packet=packet, attempts=1,

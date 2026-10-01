@@ -58,12 +58,43 @@ class VideoTests(unittest.TestCase):
         video.item = Item()
         return video
 
+    def test_catalog_pagination_has_no_start_side_effects(self):
+        self.connect()
+        video=self.controller.video
+        video.getCatalogs()
+        wait_until(lambda:not video.catalog_pending)
+        self.assertEqual([s['id'] for s in video.sources], ['direct-gst','runtime','localisation'])
+        self.assertFalse(any(m['op'] in ('camera.start','videostream.start','videostream.create') for m in self.robot.requests))
+
+    def test_observer_attaches_without_lease_and_window_close_is_local(self):
+        video=self.manual()
+        video.start(SETTINGS);wait_until(lambda:video.phase=='running')
+        ident=video.info['stream_id']
+        video.stop();wait_until(lambda:not video.info and not video.pending)
+        self.robot.streams[ident].update(state='running',run_id='other',ssrc=1234)
+        self.controller.control.lease=None
+        video.watchStream(ident,5004,'vajpegdec')
+        wait_until(lambda:video.phase=='running')
+        attach=next(m for m in self.robot.requests if m['op']=='videostream.attach')
+        self.assertNotIn('lease_epoch',attach['body'])
+        before=len(self.robot.requests)
+        video.closeWindow()
+        self.assertEqual(len(self.robot.requests),before)
+        self.assertEqual(video.phase,'running')
+
+    def test_run_change_requires_explicit_reattach(self):
+        video=self.manual();video.start(SETTINGS)
+        wait_until(lambda:video.phase=='running')
+        video.response('videostream.status',dict(video.info,run_id='new-run'),'video')
+        wait_until(lambda:not video.info and not video.pending)
+        self.assertIn('перезапущена',video.error)
+
 
     def test_remote_stop_releases_stream_and_explains_frozen_image(self):
         video=self.manual()
         video.startLocalisation()
         wait_until(lambda:video.phase=='running')
-        video.response('video.status',dict(video.info,state='stopped'),'video')
+        video.response('videostream.status',dict(video.info,state='stopped'),'video')
         wait_until(lambda:not video.info and not video.pending)
         self.assertTrue(video.view['canStart'])
         self.assertIn('остановлен на роботе',video.error)
@@ -73,8 +104,8 @@ class VideoTests(unittest.TestCase):
         video=self.manual()
         video.startLocalisation()
         wait_until(lambda: video.phase=='running')
-        request=next(m for m in self.robot.requests if m['op']=='video.create')
-        self.assertEqual(request['body']['backend'],'localisation')
+        request=next(m for m in self.robot.requests if m['op']=='videostream.create')
+        self.assertEqual(request['body']['source'],'localisation')
         self.assertNotIn('sensor',request['body'])
         self.assertEqual(request['body']['output']['width'],800)
         video.stop()
@@ -84,20 +115,20 @@ class VideoTests(unittest.TestCase):
         self.connect()
         video = self.controller.video
         video.start(SETTINGS)
-        self.assertFalse(any(m["op"].startswith("video.") for m in self.robot.requests))
+        self.assertFalse(any(m["op"].startswith("videostream.") for m in self.robot.requests))
         self.controller.control.acquire()
         wait_until(lambda: self.controller.control.owns)
         self.controller.control.enterManual()
         wait_until(lambda: self.controller.control.view["manual"] and not self.controller.control.pending)
         video.start(SETTINGS)
         wait_until(lambda: video.phase == "receiver")
-        self.assertFalse(any(m["op"] == "video.start" for m in self.robot.requests))
+        self.assertFalse(any(m["op"] == "videostream.start" for m in self.robot.requests))
         video.attach(Item())
         wait_until(lambda: video.phase == "running")
         self.controller.control.lease = None
         video.stop()
         wait_until(lambda: not video.info and not video.pending)
-        self.assertFalse(self.robot.streams)
+        self.assertTrue(all(not s.get("attached") for s in self.robot.streams.values()))
 
     def test_settings_editable_without_control_and_capabilities_visible(self):
         video = self.controller.video
@@ -111,30 +142,29 @@ class VideoTests(unittest.TestCase):
         self.assertIn("Получить управление", video.view["startBlockedReason"])
         self.controller.control.acquire()
         wait_until(lambda: self.controller.control.owns and not self.controller.control.pending)
-        self.assertIn("MANUAL", video.view["startBlockedReason"])
-        self.assertFalse(video.view["canStart"])
+        self.assertTrue(video.view["canStart"])
 
     def test_stop_while_create_is_in_flight(self):
         video = self.manual()
-        self.robot.drop_once.add("video.create")
+        self.robot.drop_once.add("videostream.create")
         video.start(SETTINGS)
         video.stop()
         wait_until(lambda: video.phase == "idle" and not video.pending)
-        self.assertFalse(self.robot.streams)
-        self.assertFalse(any(m["op"] == "video.start" for m in self.robot.requests))
+        self.assertTrue(all(not s.get("attached") for s in self.robot.streams.values()))
+        self.assertFalse(any(m["op"] == "videostream.start" for m in self.robot.requests))
 
-    def test_receiver_error_destroys_remote_stream(self):
+    def test_receiver_error_detaches_remote_stream(self):
         video = self.manual()
         video.start(SETTINGS)
         wait_until(lambda: video.phase == "running")
         video.receiver.error.emit("test pipeline error")
         wait_until(lambda: not video.info and not video.pending)
         self.assertIn("test pipeline error", video.error)
-        self.assertFalse(self.robot.streams)
+        self.assertTrue(all(not s.get("attached") for s in self.robot.streams.values()))
 
     def test_unknown_create_prevents_duplicate_streams(self):
         video = self.manual()
-        video.failed("video.create", "Response timeout (operation outcome unknown)", "video")
+        video.failed("videostream.create", "Response timeout (operation outcome unknown)", "video")
         self.assertFalse(video.view["canStart"])
         self.controller.disconnectRobot()
         wait_until(lambda: not self.controller.transport.connected)
@@ -148,8 +178,8 @@ class VideoTests(unittest.TestCase):
         main_id=main.info['stream_id']
         debug.startLocalisation();wait_until(lambda:debug.phase=='running')
         self.assertNotEqual(main_id,debug.info['stream_id'])
-        self.assertEqual(main.info['spec']['destination']['rtp_port'],5004)
-        self.assertEqual(debug.info['spec']['destination']['rtp_port'],5006)
+        self.assertEqual(main.info['destination'][1],5004)
+        self.assertEqual(debug.info['destination'][1],5006)
         debug.stop();wait_until(lambda:not debug.info and not debug.pending)
         self.assertEqual(main.phase,'running')
         self.assertIn(main_id,self.robot.streams)

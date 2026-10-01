@@ -34,6 +34,23 @@ class TuningTests(unittest.TestCase):
         assert np.allclose(values[1],[100,0,0],atol=.03)
         assert np.allclose(values[2],[53.24,80.09,67.20],atol=.05)
 
+    def test_freeze_is_unsaved_and_camera_apply_save_are_distinct(self):
+        key='camera.exposure_us'
+        self.model.metas[key]={'type':'int','min':1,'max':16667,'default':8000}
+        self.model.values[key]=8000
+        self.model.response('camera.controls.freeze',{'values':{key:7000},'source_sequence':42},'tuning:freeze')
+        assert self.model.values[key]==8000 and self.model.drafts[key]==7000
+        self.model.applyCamera()
+        assert self.control.commands[-1][0]==('camera.controls.set',{'values':{key:7000}})
+        self.model.save('camera')
+        assert self.control.commands[-1][0]==('camera.controls.save',{'values':{key:7000}})
+
+    def test_camera_controls_catalog_keeps_unknown_support_and_pages(self):
+        self.model.response('camera.controls.list',{'items':[{'key':'camera.ae_enabled','type':'bool','value':False,'supported':None}], 'next_offset':2},'tuning:controls')
+        assert self.model.metas['camera.ae_enabled']['supported'] is None
+        assert self.session.requests[-1][0]=='camera.controls.list'
+        assert self.session.requests[-1][1]=={'offset':2,'limit':2}
+
     def test_preview_and_eyedropper_are_drafts_only(self):
         self.model.snapshot();assert not self.model.overlay.isNull()
         self.model.pick(.5,.5,8)
@@ -58,7 +75,7 @@ class TuningTests(unittest.TestCase):
 
     def test_runtime_video_does_not_send_sensor_config(self):
         spec=video_request(SETTINGS|{'backend':'runtime','sensorWidth':'ignored','depth':'ignored'})
-        assert spec['backend']=='runtime' and 'sensor' not in spec
+        assert spec['source']=='runtime' and 'sensor' not in spec
 
     def test_invalid_click_has_no_effect(self):
         self.model.snapshot();self.model.pick(-.1,.3,8)

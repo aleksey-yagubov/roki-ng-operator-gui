@@ -100,7 +100,7 @@ class Localisation(QObject):
 
     @Slot()
     def startCamera(self):
-        self.command('camera.start', {'with_imu': True})
+        self.command('camera.start', {})
 
     @Slot(float, float, float)
     def start(self, x, y, yaw_degrees):
