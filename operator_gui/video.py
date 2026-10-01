@@ -238,6 +238,7 @@ class Video(QObject):
         if not self.item or not self.item.window():
             return
         try:
+            self.receiver.prepare()
             self.local_busy = True
             self.receiver.start(dict(self.info, rtp_port=self.port), self.decoder, self.latency)
         except Exception as exc:

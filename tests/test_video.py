@@ -22,9 +22,10 @@ class ReceiverStub(QObject):
     log = Signal(str, str)
 
     def prepare(self):
-        pass
+        self.prepared = True
 
     def start(self, *args):
+        assert getattr(self, 'prepared', False), 'Receiver must be prepared before start/attach'
         self.ready.emit()
 
     def stop(self):
@@ -73,6 +74,8 @@ class VideoTests(unittest.TestCase):
         video.stop();wait_until(lambda:not video.info and not video.pending)
         self.robot.streams[ident].update(state='running',run_id='other',ssrc=1234)
         self.controller.control.lease=None
+        video=self.controller.localisation_video
+        video.item=Item()
         video.watchStream(ident,5004,'vajpegdec')
         wait_until(lambda:video.phase=='running')
         attach=next(m for m in self.robot.requests if m['op']=='videostream.attach')
