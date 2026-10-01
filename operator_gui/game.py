@@ -17,6 +17,7 @@ class Game(QObject):
         self.pending = False
         self.poll_active = False
         self.received = 0.
+        self.prepared_start = None
         self.timer = QTimer(self)
         self.timer.setInterval(500)
         self.timer.timeout.connect(self._poll)
@@ -30,6 +31,9 @@ class Game(QObject):
     def view(self):
         fresh = self.session.connected and self.received > 0 and time.monotonic()-self.received < 2
         ball = self.state.get('ball')
+        can_prepare = (self.control.owns and self.control.mode == 'IDLE'
+                       and not self.control.pending and not self.control.uncertain
+                       and not self.control.moving and not self.control.held)
         return dict(running=self.state.get('running') is True, fresh=fresh,
                     state=self.state.get('state', 'Статус не запрошен'),
                     observeOnly=self.state.get('observe_only', True),
@@ -39,6 +43,8 @@ class Game(QObject):
                     travel=self.state.get('travel_m', 0), jobId=self.state.get('job_id') or '—',
                     pending=self.pending, canRefresh=self.session.connected and not self.pending,
                     canStart=not self.control.blocked_reason and not self.state.get('running', False),
+                    canObserve=(can_prepare or not self.control.blocked_reason)
+                        and not self.state.get('running', False) and self.prepared_start is None,
                     canStop=self.control.owns and self.control.pending != 'game.stop',
                     blockedReason=self.control.blocked_reason)
 
@@ -49,6 +55,14 @@ class Game(QObject):
             self.error = 'Задержка должна быть целым числом от 0 до 30 секунд.'
         elif self.state.get('running'):
             self.error = 'Сначала остановите текущую игру.'
+        elif observe_only and self.control.mode == 'IDLE' and self.view['canObserve']:
+            self.prepared_start = (True, int(delay_seconds))
+            if self.control.command('mode.set', {'mode': 'MANUAL'}, manual=False,
+                                    context='game:prepare-observation'):
+                self.error = ''
+            else:
+                self.prepared_start = None
+                self.error = self.control.error
         elif self.control.command('game.start', dict(strategy='FIRA_penalty_Goalkeeper',
                 observe_only=observe_only, delay_seconds=int(delay_seconds)), context='game:start'):
             self.error = ''
@@ -82,9 +96,11 @@ class Game(QObject):
 
     def barrier(self):
         self.pending = False
+        self.prepared_start = None
 
     def _connection(self):
         if not self.session.connected:
+            self.prepared_start = None
             self.state = {}
             self.received = 0.
             self.pending = False
@@ -92,6 +108,15 @@ class Game(QObject):
         self.changed.emit()
 
     def _response(self, op, result, context):
+        if context == 'game:prepare-observation':
+            prepared, self.prepared_start = self.prepared_start, None
+            if prepared is not None:
+                if result.get('state') == 'MANUAL' and self.control.owns:
+                    self.start(*prepared)
+                else:
+                    self.error = 'Не удалось подготовить режим наблюдения.'
+            self.changed.emit()
+            return
         if op not in ('game.start', 'game.stop', 'game.status'):
             return
         if op == 'game.status':
@@ -107,6 +132,11 @@ class Game(QObject):
         self.changed.emit()
 
     def _failed(self, op, message, context):
+        if context == 'game:prepare-observation':
+            self.prepared_start = None
+            self.error = message
+            self.changed.emit()
+            return
         if op.startswith('game.'):
             self.pending = False
             self.error = message

@@ -99,7 +99,7 @@ class FakeRobot:
                     continue
                 if op == "hello":
                     body = dict(robot_id="LOCAL-TEST", boot_id="fake-boot", heartbeat_ms=500,
-                                session_timeout_ms=2000, drive_timeout_ms=350, state="GAME",
+                                session_timeout_ms=2000, drive_timeout_ms=350, state=self.mode,
                                 capabilities_revision="manual-1", max_datagram=1400)
                     self._send(envelope("welcome", "hello", body, ident, self.session, self.token), address)
                     continue

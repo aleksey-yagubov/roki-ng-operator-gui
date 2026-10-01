@@ -17,12 +17,12 @@ ScrollView {
         }
         Flow {
             Layout.fillWidth: true; spacing: 6
-            Button { objectName: "gameObserve"; text: "Запустить наблюдение"; enabled: game.view.canStart; onClicked: game.start(true, delay.value) }
+            Button { objectName: "gameObserve"; text: "Запустить наблюдение"; enabled: game.view.canObserve; onClicked: game.start(true, delay.value) }
             Button { objectName: "gamePhysicalStart"; text: "Запустить с физическими движениями"; enabled: game.view.canStart; onClicked: game.start(false, delay.value) }
             Button { objectName: "gameStop"; text: "Остановить игру"; enabled: game.view.canStop; onClicked: game.stop() }
             Button { objectName: "gameRefresh"; text: "Запросить статус"; enabled: game.view.canRefresh; onClicked: game.refresh() }
         }
-        Label { text: game.view.blockedReason; visible: !game.view.canStart; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        Label { text: game.view.canObserve && !game.view.canStart ? "Наблюдение само включит MANUAL. Команды движения не отправляются." : game.view.blockedReason; visible: !game.view.canStart; wrapMode: Text.Wrap; Layout.fillWidth: true }
         Label { objectName: "gameError"; text: game.view.error; color: "#b03030"; visible: text.length > 0; wrapMode: Text.Wrap; Layout.fillWidth: true }
         Label { objectName: "gameState"; text: (game.view.fresh ? "" : "Нет актуального статуса. ") + game.view.state + " · " + (game.view.observeOnly ? "наблюдение" : "физические движения"); wrapMode: Text.Wrap; Layout.fillWidth: true }
         Label { text: game.view.reason; wrapMode: Text.Wrap; Layout.fillWidth: true }

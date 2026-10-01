@@ -124,3 +124,28 @@ class GameTests(unittest.TestCase):
         with patch('operator_gui.transport.time.monotonic', return_value=100):
             transport._send_request('game.start', {}, '')
         self.assertGreaterEqual(transport.pending[1]['expires'], 107)
+
+    def test_observe_from_owned_idle_prepares_manual_without_motion(self):
+        self.robot.game_running = False
+        self.robot.mode = "IDLE"
+        self.connect()
+        self.control.acquire()
+        wait_until(lambda: self.control.owns and not self.control.pending)
+        self.robot.game_running = False
+        self.assertEqual(self.control.mode, 'IDLE')
+        self.assertTrue(self.game.view['canObserve'])
+        self.assertFalse(self.game.view['canStart'])
+        self.game.start(True, 0)
+        wait_until(lambda: self.game.view['running'])
+        ops = [m['op'] for m in self.robot.requests]
+        self.assertLess(ops.index('mode.set'), ops.index('game.start'))
+        self.assertFalse(any(op.startswith('motion.') for op in ops))
+        self.assertTrue(self.robot.game_observe_only)
+
+    def test_barrier_discards_prepared_observation(self):
+        self.manual()
+        self.game.prepared_start = (True, 0)
+        self.game.barrier()
+        self.game._response('mode.set', {'state': 'MANUAL'}, 'game:prepare-observation')
+        QTest.qWait(30)
+        self.assertFalse(any(m['op'] == 'game.start' for m in self.robot.requests))
