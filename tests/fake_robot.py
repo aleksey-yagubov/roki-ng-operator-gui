@@ -26,6 +26,7 @@ class FakeRobot:
         self.silent = False
         self.sequence = 0
         self.log_id = 0
+        self.game_observe_only = True
         self.game_running = True
         self.mode = "GAME"
         self.owner = None
@@ -59,8 +60,14 @@ class FakeRobot:
         packet["sequence"] = self.sequence
         self._send(packet)
 
+    def game_state(self):
+        return dict(running=self.game_running, state="observing" if self.game_running else "stopped",
+                    observe_only=self.game_observe_only, reason="", decision="hold", ball=None,
+                    travel_m=0., job_id=None)
+
     def sample(self, topic):
         data = ({"camera": {"alive": True, "state": "idle"}} if topic == "system.workers"
+                else self.game_state() if topic == "game.state"
                 else {"head": dict(self.head)} if topic == "motion.state"
                 else {"state": "idle", "enabled": False})
         return dict(topic=topic, valid=True, source_mono_ns=123456, age_ms=5, data=data)
@@ -119,6 +126,22 @@ class FakeRobot:
         if op == "system.capabilities":
             return dict(revision="manual-1", simulated=True, future=["video", "osd"],
                         **({"localisation":{"mode":"diagnostic_only"}} if self.localisation_enabled else {}))
+        if op in ("game.start", "game.stop", "game.status"):
+            if op != "game.status":
+                assert self.owner == self.session and body['lease_epoch'] == self.lease
+            if op == "game.start":
+                assert self.mode == "MANUAL"
+                assert body['strategy'] == 'FIRA_penalty_Goalkeeper'
+                assert type(body['delay_seconds']) is int
+                assert 0 <= body['delay_seconds'] <= 30
+                self.game_observe_only = body['observe_only']
+                assert self.game_observe_only or self.values.get('game.geometry_verified') is True
+                self.game_running = True
+                self.mode = "GAME"
+            elif op == "game.stop":
+                self.game_running = False
+                self.mode = "MANUAL"
+            return self.game_state()
         if op.startswith('localisation.'):
             assert self.localisation_enabled
             if op=='localisation.start':

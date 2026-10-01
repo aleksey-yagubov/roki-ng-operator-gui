@@ -31,6 +31,7 @@ def create_engine(controller):
                         "controls": controller.control,
                         "fieldEditor": controller.field_editor,
                         "localisation": controller.localisation,
+                        "game": controller.game,
                         "visionTuning":controller.vision_tuning,
                         "video": controller.video,
                         "localisationVideo": controller.localisation_video,

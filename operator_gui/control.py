@@ -466,6 +466,12 @@ class Control(QObject):
                 self.lease = None
             if not self.owns or self.mode != "MANUAL":
                 self.stopInput()
+        elif op in ("game.start", "game.stop", "game.status"):
+            if result.get("running") is True:
+                self.mode = "GAME"
+                self.stopInput()
+            if op == "game.stop":
+                self.uncertain = False
         elif op == "motion.head":
             self.head_since = time.monotonic()
             self._head_target(result.get("target"), update_draft=self.head_edit == self.head_sent_edit)

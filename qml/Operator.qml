@@ -31,7 +31,7 @@ ApplicationWindow {
     minimumHeight: 800
     title: "ROKI NG Operator"
     onClosing: Qt.quit()
-    property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, slotsDock, testsDock, parametersDock, fieldDock, localisationDock, visionDock, dataDock, logsDock, diagnosticsDock]
+    property var docks: [connectionDock, manualDock, videoDock, imageDock, statusDock, slotsDock, testsDock, parametersDock, gameDock, fieldDock, localisationDock, visionDock, dataDock, logsDock, diagnosticsDock]
     Connections {
         target: localisationVideo
         function onShowWindow() {
@@ -72,6 +72,7 @@ ApplicationWindow {
                         MenuItem { text: "Слоты"; onTriggered: showDock(slotsDock) }
                         MenuItem { text: "Тесты"; onTriggered: showDock(testsDock) }
                         MenuItem { text: "Параметры"; onTriggered: showDock(parametersDock) }
+                        MenuItem { text: "Вратарь FIRA"; onTriggered: showDock(gameDock) }
                         MenuItem { text: "Локализация"; onTriggered: showDock(localisationDock) }
                         MenuItem { text: "Поле и ворота"; onTriggered: showDock(fieldDock) }
                         MenuItem { text: "Цвета и камера"; onTriggered: showDock(visionDock) }
@@ -192,6 +193,13 @@ ApplicationWindow {
             ParametersPanel { anchors.fill: parent; anchors.margins: 8 }
         }
         KDDW.DockWidget {
+            id: gameDock
+            objectName: "gameDock"
+            uniqueName: "game"
+            title: "Вратарь FIRA"
+            GamePanel { anchors.fill: parent; anchors.margins: 8 }
+        }
+        KDDW.DockWidget {
             id: fieldDock
             objectName: "fieldDock"
             uniqueName: "field"
@@ -243,6 +251,7 @@ ApplicationWindow {
             statusDock.addDockWidgetAsTab(slotsDock)
             statusDock.addDockWidgetAsTab(testsDock)
             statusDock.addDockWidgetAsTab(parametersDock)
+            statusDock.addDockWidgetAsTab(gameDock)
             statusDock.addDockWidgetAsTab(fieldDock)
             statusDock.addDockWidgetAsTab(localisationDock)
             statusDock.addDockWidgetAsTab(visionDock)

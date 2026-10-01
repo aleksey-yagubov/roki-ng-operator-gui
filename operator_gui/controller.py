@@ -15,6 +15,7 @@ from .video import Video
 from .field_editor import FieldEditor
 from .vision_tuning import VisionTuning
 from .localisation import Localisation
+from .game import Game
 
 
 def pretty(value):
@@ -38,6 +39,7 @@ class Controller(QObject):
         self.transport.notification.connect(self._notification)
         self.transport.diagnostic.connect(self._log)
         self.control = Control(self.transport, self._log, self)
+        self.game = Game(self.transport, self.control, self)
         self.localisation = Localisation(self.transport,self.control,self)
         self.control.barrierIssued.connect(self.localisation.barrier)
         self.field_editor = FieldEditor(self.transport,self.control,self)
@@ -238,6 +240,8 @@ class Controller(QObject):
         try:
             if op in ("session.heartbeat", "mode.set"):
                 self.mode = str(result.get("state", self.mode))
+            elif op in ("game.start", "game.status") and result.get("running") is True:
+                self.mode = "GAME"
             elif op == "system.status":
                 self.mode = str(result.get("state", "unknown"))
                 self.owner = "Нет владельца" if result.get("owner") is None else str(result["owner"])
@@ -369,6 +373,7 @@ class Controller(QObject):
         self._log("INFO", message)
 
     def shutdown(self):
+        self.game.shutdown()
         self.vision_tuning.shutdown()
         self.localisation.shutdown()
         self.video.shutdown()
