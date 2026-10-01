@@ -11,6 +11,12 @@ from tests.test_field_editor import Session,Control
 
 
 class TuningTests(unittest.TestCase):
+    def test_detector_can_start_in_game(self):
+        self.control.mode = 'GAME'
+        self.model.action('detection.start')
+        args, kwargs = self.control.commands[-1]
+        self.assertEqual(args[0], 'detection.start')
+        self.assertFalse(kwargs['manual'])
     @classmethod
     def setUpClass(cls):cls.app=QCoreApplication.instance() or QCoreApplication([])
 

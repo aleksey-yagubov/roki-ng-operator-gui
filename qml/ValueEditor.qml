@@ -6,6 +6,7 @@ RowLayout {
     id: root
     property var meta: ({})
     property var initialValue: undefined
+    property bool commitOnFinish: false
     readonly property var value: meta.type === "object" ? objectEditor.value : meta.choices ? choice.currentText : meta.type === "bool" ? boolInput.checked : number.text
     signal edited(var value)
     function reset() {
@@ -16,7 +17,7 @@ RowLayout {
         else if (meta.type !== "object")
             number.text = initialValue === undefined ? "" : String(initialValue)
     }
-    onInitialValueChanged: reset()
+    onInitialValueChanged: { if (!commitOnFinish || !number.activeFocus) reset() }
     Component.onCompleted: reset()
     ComboBox {
         id: choice
@@ -38,7 +39,8 @@ RowLayout {
         Layout.fillWidth: true
         selectByMouse: true
         placeholderText: root.meta.type === "int" ? "Целое число" : "Значение"
-        onTextEdited: root.edited(text)
+        onTextEdited: { if (!root.commitOnFinish) root.edited(text) }
+        onEditingFinished: { if (root.commitOnFinish) root.edited(text) }
     }
     ObjectEditor {
         id: objectEditor
