@@ -3,9 +3,10 @@ import socket
 import threading
 import time
 import unittest
+import gc
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEventLoop, QThread, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QThread, QTimer
 from PySide6.QtTest import QTest
 
 from operator_gui.controller import Controller
@@ -37,6 +38,8 @@ class OperatorTests(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication([])
 
     def setUp(self):
+        # Collect previous Qt fixtures outside an active event dispatch.
+        gc.collect()
         self.tmp = tempfile.TemporaryDirectory()
         self.robot = FakeRobot()
         self.controller = Controller("127.0.0.1", self.robot.port, Path(self.tmp.name))
@@ -46,7 +49,7 @@ class OperatorTests(unittest.TestCase):
         self.robot.close()
         self.assertEqual(self.robot.errors, [])
         self.controller.deleteLater()
-        QCoreApplication.sendPostedEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.tmp.cleanup()
 
     def connect(self):
