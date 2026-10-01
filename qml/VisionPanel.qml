@@ -8,8 +8,7 @@ ScrollView {
     contentWidth:availableWidth
     clip:true
     property var names:({orange_ball:"Оранжевый мяч",green_field:"Зелёное поле",white_marking:"Белая разметка",blue_posts:"Синие стойки",yellow_posts:"Жёлтые стойки",white_posts:"Белые стойки"})
-    property var labels:({l_min:"L минимум",l_max:"L максимум",a_min:"a минимум",a_max:"a максимум",b_min:"b минимум",b_max:"b максимум",pixels_min:"Минимум пикселей",box_area_min:"Минимум площади рамки",
-        "camera.exposure_us":"Выдержка, мкс","camera.analogue_gain":"Аналоговое усиление","camera.ae_enabled":"Автоэкспозиция","camera.awb_enabled":"Автобаланс белого","camera.white_balance.red_gain":"Красный gain","camera.white_balance.blue_gain":"Синий gain"})
+    property var labels:({l_min:"L минимум",l_max:"L максимум",a_min:"a минимум",a_max:"a максимум",b_min:"b минимум",b_max:"b максимум",pixels_min:"Минимум пикселей",box_area_min:"Минимум площади рамки"})
     onVisibleChanged: { visionTuning.watch(visible && watching.checked); if (!visible) visionTuning.live(false) }
     Component.onDestruction: { visionTuning.watch(false); visionTuning.live(false) }
     ColumnLayout {
@@ -17,20 +16,23 @@ ScrollView {
         Flow {
             Layout.fillWidth:true;spacing:6
             Button {text:"Загрузить настройки";enabled:backend.view.connected && !visionTuning.view.busy;onClicked:visionTuning.refresh()}
-            Button {text:"Статус камеры/детектора";enabled:backend.view.connected && !visionTuning.view.busy;onClicked:visionTuning.status()}
+            Button {text:"Статус детектора";enabled:backend.view.connected && !visionTuning.view.busy;onClicked:visionTuning.status()}
             CheckBox {id:watching;text:"Обновлять статус";onToggled:visionTuning.watch(checked && root.visible)}
         }
         Label {text:visionTuning.view.notice;Layout.fillWidth:true;wrapMode:Text.Wrap}
         Label {text:controls.view.error;visible:text!=="";Layout.fillWidth:true;wrapMode:Text.Wrap}
-        Flow {
-            Layout.fillWidth:true;spacing:6
-            Button {text:"Запустить runtime-камеру";enabled:controls.view.manual && !controls.view.pending;onClicked:visionTuning.action("camera.start")}
-            Button {text:"Остановить камеру";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.action("camera.stop")}
-            Label {text:"Калибровочный захват без IMU; видео запускается отдельно, источник runtime.";width:350;wrapMode:Text.Wrap}
+        Label {text:"Камера и ISP настраиваются в панели «Камера». Видео запрашивается отдельно в «Стримах».";Layout.fillWidth:true;wrapMode:Text.Wrap}
+        ComboBox {
+            id:previewStream
+            objectName:"tuningStream"
+            Layout.fillWidth:true
+            model:streams.view.active
+            textRole:"label"
+            currentIndex:model.findIndex(s => s.id === visionTuning.view.previewStream)
+            displayText:currentIndex >= 0 ? currentText : "Выберите принимаемый стрим"
+            onActivated:visionTuning.selectStream(model[currentIndex].id)
         }
-        TabBar {id:tabs;objectName:"tuningTabs";Layout.fillWidth:true;TabButton {text:"Цвета и детекция"} TabButton {text:"Камера"} }
         ColumnLayout {
-            visible:tabs.currentIndex===0
             Layout.fillWidth:true
             ComboBox {
                 id:profile
@@ -112,37 +114,6 @@ ScrollView {
                 Layout.fillWidth:true;wrapMode:Text.Wrap
             }
             RawDetails {text:JSON.stringify(visionTuning.view.detector,null,2);Layout.fillWidth:true}
-        }
-        ColumnLayout {
-            visible:tabs.currentIndex===1
-            Layout.fillWidth:true
-            Repeater {
-                model:visionTuning.cameraKeys
-                RowLayout {
-                    id:cameraRow
-                    required property string modelData
-                    property var entry:({meta:visionTuning.view.metas[modelData] || {},value:visionTuning.view.values[modelData]})
-                    Layout.fillWidth:true
-                    Label {text:root.labels[cameraRow.modelData] || cameraRow.modelData;Layout.preferredWidth:180}
-                    ValueEditor {Layout.fillWidth:true;enabled:cameraRow.entry.meta.supported !== false;meta:cameraRow.entry.meta;initialValue:cameraRow.entry.value;onEdited:value => visionTuning.edit(cameraRow.modelData,value)}
-                }
-            }
-            Label {text:"Ручные значения при включённой автоматике сохраняются, но не являются её измеренным результатом. Изменения применяются после сохранения без перезапуска runtime-камеры.";Layout.fillWidth:true;wrapMode:Text.Wrap}
-            Flow {
-                Layout.fillWidth:true;spacing:6
-                Button {text:"Стандартная камера";enabled:!visionTuning.view.busy && visionTuning.view.cameraRows.length>0;onClicked:visionTuning.defaults("camera")}
-                Button {text:"Сохранить камеру";enabled:controls.view.owns && !controls.view.pending && !visionTuning.view.busy;onClicked:visionTuning.save("camera")}
-                Button {text:"Применить временно";enabled:controls.view.owns && !controls.view.pending && !visionTuning.view.busy;onClicked:visionTuning.applyCamera()}
-                Button {text:"Зафиксировать экспозицию";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.freeze("exposure")}
-                Button {text:"Зафиксировать баланс белого";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.freeze("white_balance")}
-            }
-            Label {text:"Фактические значения из метаданных камеры:";font.bold:true}
-            Label {
-                property var measured:visionTuning.view.camera.measured_controls
-                text:measured ? "Кадр "+measured.sequence+" · возраст: "+visionTuning.view.camera.measured_age_ms+" мс\nВыдержка: "+(measured.exposure_us ?? "нет данных")+" мкс · gain: "+(measured.gain ?? "нет данных")+"\nWB: "+JSON.stringify(measured.colour_gains) : "Метаданные ещё не получены. Запросите статус работающей runtime-камеры."
-                Layout.fillWidth:true;wrapMode:Text.Wrap
-            }
-            RawDetails {text:JSON.stringify(visionTuning.view.camera,null,2);Layout.fillWidth:true}
         }
         Button {text:"Отменить все черновики";enabled:visionTuning.view.dirty;onClicked:visionTuning.discard()}
     }

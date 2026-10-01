@@ -98,10 +98,6 @@ class Localisation(QObject):
             self.notice = self.control.error
             self.changed.emit()
 
-    @Slot()
-    def startCamera(self):
-        self.command('camera.start', {})
-
     @Slot(float, float, float)
     def start(self, x, y, yaw_degrees):
         if not self.available:
@@ -133,9 +129,7 @@ class Localisation(QObject):
                 self.notice = ('Локализация работает. Координаты: начало в центре, +X вдоль поля вверх, +Y влево; yaw от +X.'
                                if result.get('running') else
                                'Проверка успешна: робот поддерживает локализацию. Для запуска получите управление, '
-                               'включите MANUAL, нажмите «Камера + IMU», задайте стартовую позу и нажмите «Запустить с этой позой».')
-            elif op == 'camera.start':
-                self.notice = 'Камера запущена. Дождитесь синхронизации IMU перед запуском локализации.'
+                               'включите MANUAL, запустите захват в панели «Камера», задайте стартовую позу и нажмите «Запустить с этой позой».')
         else:
             return
         self.changed.emit()

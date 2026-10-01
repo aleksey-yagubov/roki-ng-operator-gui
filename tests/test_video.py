@@ -1,16 +1,22 @@
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QImage
 
 from operator_gui.video import video_request
+from operator_gui.video_views import VideoViews
 from operator_gui.video_receiver import receiver_description
 from tests import test_operator
 from tests.test_operator import wait_until
 
 
-SETTINGS = dict(sensorWidth=1600, sensorHeight=1300, depth=10, width=800, height=648,
-                fps=60, codec="jpeg", bitrate=2000000, port=5004, decoder="vajpegdec")
+SETTINGS = dict(source="direct-gst", sensorWidth=1600, sensorHeight=1300, depth=10,
+                width=800, height=648, fps=60, max_fps=30, codec="jpeg", bitrate=2000000)
+SOURCE = dict(id="direct-gst", stream_settings=dict(codecs=["jpeg", "h264"], max_fps=[1,120],
+              max_size=[1600,1300], jpeg_alignment=8))
 
 
 class ReceiverStub(QObject):
@@ -25,7 +31,7 @@ class ReceiverStub(QObject):
         self.prepared = True
 
     def start(self, *args):
-        assert getattr(self, 'prepared', False), 'Receiver must be prepared before start/attach'
+        assert self.prepared, "Prepare local receiver before start/attach"
         self.ready.emit()
 
     def stop(self):
@@ -35,173 +41,132 @@ class ReceiverStub(QObject):
         pass
 
 
-class Item:
-    def window(self):
-        return self
-
-
 class VideoTests(unittest.TestCase):
     setUpClass = classmethod(test_operator.OperatorTests.setUpClass.__func__)
     tearDown = test_operator.OperatorTests.tearDown
     connect = test_operator.OperatorTests.connect
 
     def setUp(self):
-        with patch("operator_gui.video.Receiver", ReceiverStub):
-            test_operator.OperatorTests.setUp(self)
+        self.patcher=patch("operator_gui.video.Receiver", ReceiverStub)
+        self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+        test_operator.OperatorTests.setUp(self)
+        self.manager=self.controller.streams
 
     def manual(self):
         self.connect()
         self.controller.control.acquire()
-        wait_until(lambda: self.controller.control.owns)
+        wait_until(lambda:self.controller.control.owns)
         self.controller.control.enterManual()
-        wait_until(lambda: self.controller.control.view["manual"] and not self.controller.control.pending)
-        video = self.controller.video
-        video.item = Item()
-        return video
+        wait_until(lambda:self.controller.control.view["manual"] and not self.controller.control.pending)
+        self.manager.refresh()
+        wait_until(lambda:not self.manager.pending)
 
-    def test_catalog_pagination_has_no_start_side_effects(self):
-        self.connect()
-        video=self.controller.video
-        video.getCatalogs()
-        wait_until(lambda:not video.catalog_pending)
-        self.assertEqual([s['id'] for s in video.sources], ['direct-gst','runtime','localisation'])
-        self.assertFalse(any(m['op'] in ('camera.start','videostream.start','videostream.create') for m in self.robot.requests))
+    def create(self, source="direct-gst"):
+        before=self.manager.last_created
+        self.manager.create(SETTINGS | dict(source=source))
+        wait_until(lambda:self.manager.last_created!=before and not self.manager.pending)
+        return self.manager.last_created
 
-    def test_observer_attaches_without_lease_and_window_close_is_local(self):
-        video=self.manual()
-        video.start(SETTINGS);wait_until(lambda:video.phase=='running')
-        ident=video.info['stream_id']
-        video.stop();wait_until(lambda:not video.info and not video.pending)
-        self.robot.streams[ident].update(state='running',run_id='other',ssrc=1234)
+    def start(self, ident, port=5004):
+        self.manager.connectStream(ident,port,"jpegdec",True)
+        wait_until(lambda:self.manager.players[ident].phase=="receiving")
+        return self.manager.players[ident]
+
+    def test_catalog_is_explicit_and_create_does_not_start(self):
+        self.manual()
+        self.assertEqual([s["id"] for s in self.manager.sources],["direct-gst","runtime","localisation"])
+        ident=self.create()
+        self.assertEqual(self.manager.details[ident]["state"],"created")
+        self.assertFalse(self.manager.players)
+        self.assertFalse(any(m["op"] in ("camera.start","videostream.start","videostream.attach") for m in self.robot.requests))
+
+    def test_views_share_receiver_and_never_send_commands(self):
+        self.manual();ident=self.create();p=self.start(ident)
+        requests=len(self.robot.requests)
+        views=self.controller.video_views
+        first=views.add(ident);second=views.add(ident)
+        image=QImage(8,8,QImage.Format.Format_RGB32);image.fill(0xff008000)
+        p.receiver.imageReady.emit(image)
+        self.assertEqual(len(self.manager.players),1)
+        self.assertEqual(views.selected(first),views.selected(second))
+        self.assertTrue(self.manager.imageUrl(ident))
+        views.remove(first);views.select(second,"");views.remove(second)
+        self.assertEqual(len(self.robot.requests),requests)
+        self.assertEqual(p.phase,"receiving")
+
+    def test_observer_attach_and_detach_no_lease(self):
+        self.manual();ident=self.create()
+        self.robot.streams[ident].update(state="running",run_id="other",ssrc=1234)
         self.controller.control.lease=None
-        video=self.controller.localisation_video
-        video.item=Item()
-        video.watchStream(ident,5004,'vajpegdec')
-        wait_until(lambda:video.phase=='running')
-        attach=next(m for m in self.robot.requests if m['op']=='videostream.attach')
-        self.assertNotIn('lease_epoch',attach['body'])
-        before=len(self.robot.requests)
-        video.closeWindow()
-        self.assertEqual(len(self.robot.requests),before)
-        self.assertEqual(video.phase,'running')
+        self.manager.connectStream(ident,5004,"jpegdec",False)
+        wait_until(lambda:self.manager.players[ident].phase=="receiving")
+        attach=next(m for m in self.robot.requests if m["op"]=="videostream.attach")
+        self.assertNotIn("lease_epoch",attach["body"])
+        self.manager.detach(ident)
+        wait_until(lambda:self.manager.players[ident].phase=="stopped")
+        self.assertFalse(self.robot.streams[ident]["attached"])
 
-    def test_run_change_requires_explicit_reattach(self):
-        video=self.manual();video.start(SETTINGS)
-        wait_until(lambda:video.phase=='running')
-        video.response('videostream.status',dict(video.info,run_id='new-run'),'video')
-        wait_until(lambda:not video.info and not video.pending)
-        self.assertIn('перезапущена',video.error)
+    def test_second_receiver_requires_distinct_port(self):
+        self.manual();one=self.create();self.start(one);two=self.create()
+        self.manager.connectStream(two,5004,"jpegdec",True)
+        self.assertNotIn(two,self.manager.players)
+        self.start(two,5006)
+        self.assertEqual(len(self.manager.view["active"]),2)
 
+    def test_run_change_clears_image_and_requires_explicit_action(self):
+        self.manual();ident=self.create();p=self.start(ident)
+        image=QImage(8,8,QImage.Format.Format_RGB32);p.receiver.imageReady.emit(image)
+        self.manager.inspect_result(dict(p.info,run_id="new"))
+        wait_until(lambda:p.phase=="stopped")
+        self.assertIn("перезапущена",p.error)
+        self.assertTrue(p.image.isNull())
+        self.assertFalse(self.manager.view["active"])
 
-    def test_remote_stop_releases_stream_and_explains_frozen_image(self):
-        video=self.manual()
-        video.startLocalisation()
-        wait_until(lambda:video.phase=='running')
-        video.response('videostream.status',dict(video.info,state='stopped'),'video')
-        wait_until(lambda:not video.info and not video.pending)
-        self.assertTrue(video.view['canStart'])
-        self.assertIn('остановлен на роботе',video.error)
-        self.assertFalse(video.timer.isActive())
+    def test_remote_stop_and_receiver_error(self):
+        self.manual();ident=self.create();p=self.start(ident)
+        self.manager.inspect_result(dict(p.info,state="stopped"))
+        self.assertEqual(p.phase,"stopped")
+        self.assertTrue(p.image.isNull())
+        self.start(ident)
+        p.receiver.error.emit("test decode failure")
+        wait_until(lambda:p.phase=="stopped" and not self.manager.busy(ident))
+        self.assertIn("test decode failure",p.error)
+        self.assertFalse(self.robot.streams[ident]["attached"])
 
-    def test_localisation_video_uses_stream_worker_source(self):
-        video=self.manual()
-        video.startLocalisation()
-        wait_until(lambda: video.phase=='running')
-        request=next(m for m in self.robot.requests if m['op']=='videostream.create')
-        self.assertEqual(request['body']['source'],'localisation')
-        self.assertNotIn('sensor',request['body'])
-        self.assertEqual(request['body']['output']['width'],800)
-        video.stop()
-        wait_until(lambda: not video.info and not video.pending)
+    def test_unknown_creation_requires_acknowledgement_not_retry(self):
+        self.manual()
+        self.robot.silent=True
+        self.manager.create(SETTINGS)
+        context=next(k for k,v in self.manager.pending.items() if v[0]=="create")
+        self.manager.failed("videostream.create","Response timeout (operation outcome unknown)",context)
+        self.assertFalse(self.manager.view["canCreate"])
+        self.manager.acknowledgeUnknownCreate()
+        self.assertTrue(self.manager.view["canCreate"])
 
-    def test_explicit_start_receiver_before_remote_and_stop_without_lease(self):
-        self.connect()
-        video = self.controller.video
-        video.start(SETTINGS)
-        self.assertFalse(any(m["op"].startswith("videostream.") for m in self.robot.requests))
-        self.controller.control.acquire()
-        wait_until(lambda: self.controller.control.owns)
-        self.controller.control.enterManual()
-        wait_until(lambda: self.controller.control.view["manual"] and not self.controller.control.pending)
-        video.start(SETTINGS)
-        wait_until(lambda: video.phase == "receiver")
-        self.assertFalse(any(m["op"] == "videostream.start" for m in self.robot.requests))
-        video.attach(Item())
-        wait_until(lambda: video.phase == "running")
-        self.controller.control.lease = None
-        video.stop()
-        wait_until(lambda: not video.info and not video.pending)
-        self.assertTrue(all(not s.get("attached") for s in self.robot.streams.values()))
+    def test_arbitrary_catalog_source_and_no_sensor_for_runtime(self):
+        for source in ("runtime","localisation","future-camera"):
+            spec=video_request(SETTINGS,dict(SOURCE,id=source))
+            self.assertEqual(spec["source"],source)
+            self.assertNotIn("sensor",spec)
+            self.assertNotIn("rtp_port",spec)
 
-    def test_settings_editable_without_control_and_capabilities_visible(self):
-        video = self.controller.video
-        self.assertTrue(video.view["canEditSettings"])
-        self.assertFalse(video.view["canStart"])
-        self.connect()
-        video.getCapabilities()
-        wait_until(lambda: bool(video.capabilities))
-        self.assertIn("h264", video.view["capabilitiesSummary"])
-        self.assertTrue(video.view["canEditSettings"])
-        self.assertIn("Получить управление", video.view["startBlockedReason"])
-        self.controller.control.acquire()
-        wait_until(lambda: self.controller.control.owns and not self.controller.control.pending)
-        self.assertTrue(video.view["canStart"])
+    def test_view_manifest_restores_only_panels_not_subscriptions(self):
+        views=self.controller.video_views
+        ident=views.add("1")
+        self.assertTrue(views.save())
+        restored=VideoViews(Path(self.tmp.name)/"video-views.json")
+        self.assertEqual(restored.entries,[dict(id=ident,stream="")])
+        views.remove(ident)
+        self.assertTrue(views.restore())
+        self.assertEqual(views.entries,[dict(id=ident,stream="")])
+        self.assertFalse(self.robot.requests)
 
-    def test_stop_while_create_is_in_flight(self):
-        video = self.manual()
-        self.robot.drop_once.add("videostream.create")
-        video.start(SETTINGS)
-        video.stop()
-        wait_until(lambda: video.phase == "idle" and not video.pending)
-        self.assertTrue(all(not s.get("attached") for s in self.robot.streams.values()))
-        self.assertFalse(any(m["op"] == "videostream.start" for m in self.robot.requests))
-
-    def test_receiver_error_detaches_remote_stream(self):
-        video = self.manual()
-        video.start(SETTINGS)
-        wait_until(lambda: video.phase == "running")
-        video.receiver.error.emit("test pipeline error")
-        wait_until(lambda: not video.info and not video.pending)
-        self.assertIn("test pipeline error", video.error)
-        self.assertTrue(all(not s.get("attached") for s in self.robot.streams.values()))
-
-    def test_unknown_create_prevents_duplicate_streams(self):
-        video = self.manual()
-        video.failed("videostream.create", "Response timeout (operation outcome unknown)", "video")
-        self.assertFalse(video.view["canStart"])
-        self.controller.disconnectRobot()
-        wait_until(lambda: not self.controller.transport.connected)
-        self.assertFalse(video.unknown_create)
-
-    def test_main_and_localisation_players_are_independent_subscriptions(self):
-        main=self.manual()
-        debug=self.controller.localisation_video;debug.item=Item()
-        main.start(dict(SETTINGS,backend='runtime'))
-        wait_until(lambda:main.phase=='running')
-        main_id=main.info['stream_id']
-        debug.startLocalisation();wait_until(lambda:debug.phase=='running')
-        self.assertNotEqual(main_id,debug.info['stream_id'])
-        self.assertEqual(main.info['destination'][1],5004)
-        self.assertEqual(debug.info['destination'][1],5006)
-        debug.stop();wait_until(lambda:not debug.info and not debug.pending)
-        self.assertEqual(main.phase,'running')
-        self.assertIn(main_id,self.robot.streams)
-        self.assertFalse(any(m['op'] in ('camera.stop','localisation.stop') for m in self.robot.requests))
-
-
-class VideoValidationTests(unittest.TestCase):
-    def test_spec_and_decoder_choices_with_qimage(self):
-        spec = video_request(SETTINGS)
-        self.assertNotIn("bitrate", spec["codec"])
-        self.assertEqual(spec["sensor"], dict(width=1600, height=1300, depth=10))
-        for codec, decoders in (("JPEG", ("vajpegdec", "jpegdec")),
-                                ("H264", ("vah264dec", "avdec_h264"))):
-            info = dict(encoding_name=codec, payload_type=96, ssrc=123)
-            for decoder in decoders:
-                launch = receiver_description(info, decoder, 30)
-                self.assertIn(decoder, launch)
-                self.assertIn("appsink name=frames", launch)
-                self.assertIn("video/x-raw,format=RGBA", launch)
-        for values in (dict(height=650), dict(fps="nan"), dict(depth=9), dict(port=80)):
-            with self.assertRaises(ValueError):
-                video_request(SETTINGS | values)
+    def test_request_validation_and_receiver(self):
+        spec=video_request(SETTINGS,SOURCE)
+        self.assertEqual(spec["mtu"],1400)
+        for values in (dict(height=650),dict(fps="nan"),dict(depth=9),dict(codec="bogus")):
+            with self.assertRaises(ValueError):video_request(SETTINGS | values,SOURCE)
+        info=dict(spec=spec,rtp_port=5004,encoding_name="JPEG",payload_type=26,clock_rate=90000)
+        launch=receiver_description(info,"jpegdec",30)
+        self.assertIn("appsink name=frames",launch)

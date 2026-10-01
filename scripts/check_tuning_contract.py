@@ -17,8 +17,10 @@ from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from operator_gui.vision_tuning import VisionTuning
 from operator_gui.field_editor import FieldEditor
+from operator_gui.camera import Camera
 from roki_ng.supervisor import Supervisor
 from roki_ng.parameters import Parameters
+from roki_ng.camera import Camera as RuntimeCamera
 from roki_ng.wire import envelope,pack,unpack,Fault
 
 
@@ -45,8 +47,12 @@ class Session(QObject):
         QTimer.singleShot(0,deliver)
 
 
-class Control:
-    def __init__(self,session):self.session=session
+class Control(QObject):
+    changed=Signal()
+    barrierIssued=Signal()
+    owns=True
+    pending=False
+    def __init__(self,session):super().__init__();self.session=session
     def command(self,op,body,**options):
         self.session.request(op,body|{'lease_epoch':1},options['context']);return True
 
@@ -62,16 +68,20 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         server=Supervisor({'state_dir':directory});server.require_control=lambda *args:None
         server.workers={k:SimpleNamespace(call=AsyncMock(return_value={})) for k in ('camera','detection','localisation')}
+        runtime_camera=RuntimeCamera({'simulate':True,'parameters':server.params.values},lambda *args:None,lambda *args:None)
+        server.workers['camera']=SimpleNamespace(call=AsyncMock(side_effect=lambda op,args=None:runtime_camera.command(op,args or {})))
         session=Session(server);control=Control(session)
-        tuning=VisionTuning(session,control,SimpleNamespace(image=QImage()))
+        tuning=VisionTuning(session,control,SimpleNamespace(players={}))
         field=FieldEditor(session,control)
+        camera=Camera(session,control)
         tuning.refresh();wait(lambda:not tuning.busy)
-        assert len(tuning.profiles)==6 and 'camera.awb_enabled' in tuning.metas
+        assert len(tuning.profiles)==6 and not any(k.startswith('camera.') for k in tuning.metas)
         tuning.select('white_marking')
         tuning.edit('vision.white_marking.l_min',12);tuning.edit('vision.white_marking.l_max',42)
         tuning.save('lab');wait(lambda:not tuning.drafts)
         assert Parameters(directory).values['vision.white_marking.l_max']==42
-        tuning.edit('camera.awb_enabled',True);tuning.save('camera');wait(lambda:not tuning.drafts)
+        camera.refresh();wait(lambda:not camera.pending)
+        camera.edit('camera.awb_enabled',True);camera.apply(True);wait(lambda:not camera.drafts)
         assert Parameters(directory).values['camera.awb_enabled'] is True
         field.refresh();wait(lambda:not field.busy)
         assert len(field.metas)==19

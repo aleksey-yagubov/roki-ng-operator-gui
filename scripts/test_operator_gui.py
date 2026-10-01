@@ -40,8 +40,9 @@ def main():
     app.setOrganizationName("ROKI-test")
     app.setApplicationName("operator-test")
     robot = FakeRobot()
-    with patch("operator_gui.video.Receiver", ReceiverStub):
-        backend = Controller("127.0.0.1", robot.port, output)
+    receiver_patch = patch("operator_gui.video.Receiver", ReceiverStub)
+    receiver_patch.start()
+    backend = Controller("127.0.0.1", robot.port, output)
     backend.control.install_keyboard(app)
     engine = create_engine(backend)
     warnings = []
@@ -74,7 +75,7 @@ def main():
         assert isinstance(obj, QQuickItem) and obj.isVisible() and obj.isEnabled(), name
         ancestor = obj.parentItem()
         while ancestor is not None:
-            if ancestor.objectName() == "manualScroll":
+            if ancestor.objectName() in ("manualScroll", "cameraScroll", "streamsScroll"):
                 viewport = ancestor.property("contentItem")
                 position = obj.mapToItem(viewport, QPointF(0, 0))
                 for axis, coordinate, size, extent in (
@@ -390,11 +391,55 @@ def main():
             click("saveParameterButton")
             wait_until(lambda: robot.values.get("head.field_tilt") == -1200)
             snapshot("13-parameter-editor")
+            show("cameraDock")
+            click("cameraRefresh")
+            wait_until(lambda:bool(backend.camera.keys) and not backend.camera.pending)
+            click("cameraStart")
+            wait_until(lambda:robot.camera_running and not backend.control.pending)
+            assert not backend.streams.players
+            backend.camera.edit("camera.exposure_us",7000)
+            click("cameraApply")
+            wait_until(lambda:robot.camera_exposure==7000 and not backend.control.pending)
+            assert backend.camera.drafts
+            click("cameraSave")
+            wait_until(lambda:not backend.camera.drafts and not backend.control.pending)
+            snapshot("13-camera-isp-separate")
             show("videoDock")
             click("videoCatalogButton")
-            wait_until(lambda: len(backend.video.sources)==3 and not backend.video.catalog_pending)
-            assert not backend.video.info
+            wait_until(lambda: len(backend.streams.sources)==3 and not backend.streams.view['catalogBusy'])
+            assert not backend.streams.players
             snapshot("13h-video-source-catalog")
+            source=item("streamSource")
+            keyboard=backend.control.keyboard
+            backend.control.setKeyboard(False)
+            source.forceActiveFocus()
+            QTest.keyClick(window,Qt.Key.Key_Down)
+            settle(1300)
+            assert source.property("currentIndex")==1
+            backend.control.setKeyboard(keyboard)
+            assert not item("directCaptureFields").isVisible()
+            click("streamCreate")
+            wait_until(lambda:bool(backend.streams.last_created) and not backend.streams.busy(backend.streams.last_created))
+            stream=backend.streams.last_created
+            assert robot.streams[stream]["spec"]["source"]=="runtime"
+            assert "sensor" not in robot.streams[stream]["spec"]
+            assert not backend.streams.players
+            click("streamStart")
+            wait_until(lambda:stream in backend.streams.players and backend.streams.players[stream].phase=="receiving")
+            click("addVideoView")
+            first=backend.video_views.entries[-1]["id"]
+            assert backend.video_views.selected(first)==stream
+            second=backend.video_views.add(stream)
+            assert len(backend.streams.players)==1
+            show("viewDock-"+first)
+            snapshot("13-multiple-views")
+            backend.video_views.remove(first)
+            backend.video_views.remove(second)
+            show("videoDock")
+            wait_until(lambda:not backend.streams.busy(stream))
+            click("videoDetachButton")
+            wait_until(lambda:backend.streams.players[stream].phase=="stopped")
+            snapshot("13-streams-separated")
             show("fieldDock")
             backend.field_editor.values.update({'match.own_goal':0,
                 'field.goal.0':{'colour':'yellow','x':-1.675,'y':0,'width':1.},
@@ -416,21 +461,29 @@ def main():
                     tuning.metas[key]={'type':'int','min':low,'max':high,'default':value}
                     tuning.values[key]=value
             frame=QImage(800,650,QImage.Format.Format_RGB888);frame.fill(0xff208030)
-            backend.video.image=frame;backend.video.last_image_at=time.monotonic();backend.video.image_serial+=1
+            from operator_gui.video import Player
+            player=Player(backend.streams,'preview')
+            player.info={'spec':{'source':'runtime'}}
+            player.phase='receiving'
+            backend.streams.players['preview']=player
+            backend.streams.watching=False
+            backend.streams.timer.stop()
+            player.receive_image(frame)
+            tuning.selectStream('preview')
             tuning.catalogChanged.emit();tuning.changed.emit();settle()
             click('tuningLive')
             wait_until(lambda: tuning.view['live'] and not tuning.source.isNull())
             previous=tuning.serial
-            backend.video.image_serial+=1;backend.video.last_image_at=time.monotonic()
+            player.image_serial+=1;player.last_image_at=time.monotonic()
             wait_until(lambda: tuning.serial>previous)
             snapshot('13c-live-lab-preview')
             click('tuningSnapshot')
             assert not tuning.view['live']
             previous=tuning.serial
-            backend.video.image_serial+=1;settle(300)
+            player.image_serial+=1;settle(300)
             assert tuning.serial==previous
             click('tuningLive')
-            backend.video.last_image_at=time.monotonic()-4
+            player.last_image_at=time.monotonic()-4
             wait_until(lambda: tuning.source.isNull())
             snapshot('13d-live-lab-stale')
             # Existing Qt click harness exercises the actual QML panel and UDP path.
@@ -462,16 +515,6 @@ def main():
             show("localisationDock")
             wait_until(lambda:backend.localisation.view['watching'] and sum(m['op']=='localisation.status' for m in robot.requests)>before)
             snapshot("13g-localisation-poll-resumes")
-            click("localisationVideoStart")
-            wait_until(lambda: backend.localisation_video.phase=='running')
-            assert backend.localisation_video.backend=='localisation'
-            assert item("localisationProcessedVideo").isVisible()
-            image=QImage(800,650,QImage.Format.Format_RGB32);image.fill(0xff208030)
-            backend.localisation_video.receiver.imageReady.emit(image);settle()
-            assert not backend.localisation_video.image.isNull()
-            snapshot("13f-localisation-processed-video")
-            click("localisationVideoStop")
-            wait_until(lambda: not backend.localisation_video.info and not backend.localisation_video.pending)
             robot.localisation_age=1800
             click("localisationRefresh")
             wait_until(lambda: not backend.localisation.pending)
@@ -520,6 +563,7 @@ def main():
     engine.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     inspected_items.clear()
+    receiver_patch.stop()
     return code
 
 

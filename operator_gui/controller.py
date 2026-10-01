@@ -11,7 +11,9 @@ from .models import Rows, LogFilter, ParameterFilter
 from .transport import Session
 from .control import Control, scalar
 from .data_sources import DataSources
-from .video import Video
+from .video import Streams
+from .camera import Camera
+from .video_views import VideoViews
 from .field_editor import FieldEditor
 from .vision_tuning import VisionTuning
 from .localisation import Localisation
@@ -80,9 +82,10 @@ class Controller(QObject):
         self.clock.timeout.connect(self.changed.emit)
         self.clock.start()
         self._log("INFO", "Клиент запущен. Подключение только по явному действию оператора.")
-        self.video = Video(self.transport, self.control, self._log, self)
-        self.localisation_video = Video(self.transport,self.control,self._log,self,context="localisationVideo")
-        self.vision_tuning = VisionTuning(self.transport,self.control,self.video,self)
+        self.streams = Streams(self.transport, self.control, self._log, self)
+        self.camera = Camera(self.transport, self.control, self)
+        self.video_views = VideoViews(config_dir / "video-views.json", self)
+        self.vision_tuning = VisionTuning(self.transport, self.control, self.streams, self)
 
     @Property("QVariantMap", notify=changed)
     def view(self):
@@ -141,6 +144,8 @@ class Controller(QObject):
     def _transport_changed(self):
         if not self.transport.connected:
             self.pages.clear()
+            if hasattr(self, "video_views"):
+                self.video_views.clearSelections()
         self.changed.emit()
 
     @Slot(object)
@@ -376,8 +381,8 @@ class Controller(QObject):
         self.game.shutdown()
         self.vision_tuning.shutdown()
         self.localisation.shutdown()
-        self.video.shutdown()
-        self.localisation_video.shutdown()
+        self.streams.shutdown()
+        self.camera.shutdown()
         self.data_sources.shutdown()
         self.control.shutdown()
         self.clock.stop()

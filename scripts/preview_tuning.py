@@ -15,6 +15,7 @@ from PySide6.QtGui import QGuiApplication,QImage
 from PySide6.QtQuick import QQuickView,QQuickWindow,QSGRendererInterface
 from PySide6.QtTest import QTest
 from operator_gui.controller import Controller
+from operator_gui.video import Player
 from operator_gui.vision_tuning import TuningImages
 from roki_ng.parameters import Parameters,COLOUR_DEFAULTS
 
@@ -25,16 +26,19 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         c=Controller('127.0.0.1',8093,Path(directory));p=Parameters(directory);t=c.vision_tuning
         try:
-            t.values={k:v for k,v in p.values.items() if k.startswith(('vision.','camera.'))}
+            t.values={k:v for k,v in p.values.items() if k.startswith('vision.')}
             t.metas={k:p.describe(k) for k in t.values}
             t.profiles=list(COLOUR_DEFAULTS);t.profile='green_field'
             image=QImage(sys.argv[1])
             if image.isNull():raise ValueError('Cannot load frame')
-            c.video.backend='runtime (офлайн запись)';c.video.receive_image(image)
+            player=Player(c.streams,'offline')
+            player.info={'spec':{'source':'runtime (офлайн запись)'}}
+            player.phase='receiving';c.streams.players['offline']=player
+            player.receive_image(image);t.selectStream('offline')
             t.snapshot();t.notice='Офлайн preview. Робот не подключён, используются defaults.'
             v=QQuickView();v.resize(1050,1100)
             v.engine().addImageProvider('tuning',TuningImages(t))
-            for name,obj in [('backend',c),('controls',c.control),('visionTuning',t)]:
+            for name,obj in [('backend',c),('controls',c.control),('visionTuning',t),('streams',c.streams)]:
                 v.rootContext().setContextProperty(name,obj)
             v.setResizeMode(QQuickView.SizeRootObjectToView)
             v.setSource(QUrl.fromLocalFile(str(ROOT/'qml/VisionPanel.qml')))
@@ -49,10 +53,7 @@ def main():
                     pos=source.mapToScene(source.boundingRect().center())
                     QTest.mouseClick(v,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,QPoint(int(pos.x()),int(pos.y())))
                     assert len(t.drafts)==6,'QML eyedropper did not update six LAB boundaries'
-                    tabs=v.rootObject().findChild(QObject,'tuningTabs');tabs.setProperty('currentIndex',1)
-                    QTest.qWait(100)
-                    assert v.grabWindow().save(str(ROOT/'artifacts/camera-tuning.png'))
-                    print('QML click and camera tab passed:',target,flush=True)
+                    print('QML LAB preview and eyedropper passed:',target,flush=True)
                 except Exception as exc:failures.append(exc)
                 finally:app.quit()
             QTimer.singleShot(700,finish);app.exec();v.setSource(QUrl())

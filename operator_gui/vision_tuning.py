@@ -1,4 +1,4 @@
-"""Colour/camera tuning over params.*, explicit capture, bounded live local preview."""
+"""LAB tuning from an explicitly selected shared receiver; no camera ownership."""
 import time
 
 from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer,Qt
@@ -18,13 +18,14 @@ class TuningImages(QQuickImageProvider):
 class VisionTuning(QObject):
     changed=Signal()
     catalogChanged=Signal()
-    def __init__(self,session,control,video,parent=None):
+    def __init__(self,session,control,streams,parent=None):
         super().__init__(parent)
-        self.session,self.control,self.video=session,control,video
+        self.session,self.control,self.streams=session,control,streams
+        self.preview_stream=''
         self.metas={};self.values={};self.drafts={};self.profiles=[];self.profile=''
         self.queue=[];self.busy=False;self.notice='Загрузите настройки с робота.'
         self.catalog_dirty=False
-        self.camera={};self.detector={};self.source=QImage();self.overlay=QImage()
+        self.detector={};self.source=QImage();self.overlay=QImage()
         self.lab=self.rgb=None;self.serial=0;self.selected_pixels=0;self.source_label='Нет снимка'
         self.timer=QTimer(self);self.timer.setInterval(1000);self.timer.timeout.connect(self.status)
         self.preview_timer=QTimer(self);self.preview_timer.setInterval(200);self.preview_timer.timeout.connect(self.preview_tick)
@@ -32,7 +33,7 @@ class VisionTuning(QObject):
         session.response.connect(self.response);session.failed.connect(self.failed);session.changed.connect(self.connection)
 
     def keys(self,scope):
-        prefix='camera.' if scope=='camera' else 'vision.'+self.profile+'.'
+        prefix='vision.'+self.profile+'.'
         return [k for k in self.metas if k.startswith(prefix)]
 
     def rows(self,scope):
@@ -41,13 +42,10 @@ class VisionTuning(QObject):
     @Property('QStringList',notify=catalogChanged)
     def labKeys(self):return self.keys('lab')
 
-    @Property('QStringList',notify=catalogChanged)
-    def cameraKeys(self):return self.keys('camera')
-
     @Property('QVariantMap',notify=changed)
     def view(self):
-        return dict(profiles=self.profiles,profile=self.profile,labRows=self.rows('lab'),cameraRows=self.rows('camera'),
-            busy=self.busy,notice=self.notice,camera=self.camera,detector=self.detector,
+        return dict(profiles=self.profiles,profile=self.profile,labRows=self.rows('lab'),
+            busy=self.busy,notice=self.notice,previewStream=self.preview_stream,detector=self.detector,
             serial=self.serial,hasImage=not self.source.isNull(),pixels=self.selected_pixels,sourceLabel=self.source_label,
             live=self.preview_timer.isActive(),dirty=bool(self.drafts),watching=self.timer.isActive(),metas=self.metas,values=self.values|self.drafts)
 
@@ -56,7 +54,7 @@ class VisionTuning(QObject):
         if not self.session.connected:
             self.preview_timer.stop();self.preview_frame=None
             self.timer.stop();self.queue=[];self.busy=False;self.metas={};self.values={};self.drafts={}
-            self.profiles=[];self.profile='';self.camera={};self.detector={}
+            self.profiles=[];self.profile='';self.preview_stream='';self.detector={}
             self.source=QImage();self.overlay=QImage();self.lab=self.rgb=None;self.serial+=1
             self.notice='Нет соединения. Перечитайте настройки после подключения.';self.catalogChanged.emit();self.changed.emit()
 
@@ -75,7 +73,6 @@ class VisionTuning(QObject):
         self.metas={};self.values={}
         self.catalog_dirty=True
         self.queue=[('detection.list',{},'tuning:profiles')]
-        self.queue.append(('camera.controls.list',{'offset':0,'limit':2},'tuning:controls'))
         for prefix in ('vision.',):
             self.queue.append(('params.keys',{'prefix':prefix,'limit':8},'tuning:keys:'+prefix))
         self.next()
@@ -83,7 +80,7 @@ class VisionTuning(QObject):
     @Slot()
     def status(self):
         if self.busy or not self.session.connected:return
-        self.queue=[('camera.status',{},'tuning:status'),('detection.status',{},'tuning:status')];self.next()
+        self.queue=[('detection.status',{},'tuning:status')];self.next()
 
     @Slot(bool)
     def watch(self,enabled):
@@ -110,28 +107,14 @@ class VisionTuning(QObject):
             if op=='params.describe':self.metas[result['key']]=result
             elif 'values' in result:self.values.update(result['values'])
             else:self.values[result['key']]=result['value']
-        elif context=='tuning:controls':
-            for item in result['items']:
-                self.metas[item['key']]=item
-                self.values[item['key']]=item['value']
-            if result.get('next_offset') is not None:
-                self.queue.insert(0,('camera.controls.list',{'offset':result['next_offset'],'limit':2},context))
-        elif context=='tuning:apply':
-            self.notice='Применено временно. Для сохранения после перезапуска нажмите «Сохранить камеру».'
-            self.changed.emit();return
         elif context=='tuning:save':
             self.values.update(result['values'])
             for key in result['values']:self.drafts.pop(key,None)
             self.notice='Настройки сохранены на роботе.';self.recompute();self.changed.emit();return
-        elif context=='tuning:freeze':
-            self.drafts.update(result['values'])
-            self.notice=f"Автоматика зафиксирована по кадру {result['source_sequence']}; нажмите Сохранить для записи на роботе.";self.changed.emit();return
         elif context=='tuning:status':
-            if op=='camera.status':self.camera=result
-            else:self.detector=result
+            self.detector=result
         elif context=='tuning:action':
-            if op.startswith('camera.'):self.camera=result
-            else:self.detector=result
+            self.detector=result
             self.changed.emit();return
         self.next()
 
@@ -163,27 +146,12 @@ class VisionTuning(QObject):
         if self.busy:return
         keys=[k for k in self.keys(scope) if k in self.drafts]
         if not keys:return
-        if scope=='camera':
-            self.control.command('camera.controls.save',{'values':{k:self.drafts[k] for k in keys}},manual=False,job=False,context='tuning:save')
-            return
         self.control.command('params.set',{'values':{k:self.drafts[k] for k in keys},
             'expected_values':{k:self.values[k] for k in keys}},manual=False,job=False,context='tuning:save')
 
-    @Slot()
-    def applyCamera(self):
-        if self.busy:return
-        values={k:self.drafts[k] for k in self.keys('camera') if k in self.drafts}
-        if values:self.control.command('camera.controls.set',{'values':values},manual=False,job=False,context='tuning:apply')
-
-    @Slot(str)
-    def freeze(self,group):
-        if self.busy:return
-        if group in ('all','exposure','white_balance'):
-            self.control.command('camera.controls.freeze',{'group':group},manual=False,job=False,context='tuning:freeze')
-
     @Slot(str)
     def action(self,op):
-        if op not in ('camera.start','camera.stop','detection.start','detection.stop'):return
+        if op not in ('detection.start','detection.stop'):return
         args={'profile':self.profile} if op=='detection.start' else {}
         sent=self.control.command(op,args,manual=op.endswith('.start'),job=False,context='tuning:action')
         if not sent:
@@ -199,9 +167,22 @@ class VisionTuning(QObject):
             self.preview_timer.stop()
         self.changed.emit()
 
+    @Slot(str)
+    def selectStream(self,ident):
+        self.live(False)
+        self.preview_stream=ident
+        self.source=QImage();self.overlay=QImage();self.lab=self.rgb=None;self.serial+=1
+        self.source_label='Выберите кадр из принимаемого стрима.'
+        self.changed.emit()
+
+    @property
+    def video(self):
+        player=self.streams.players.get(self.preview_stream)
+        return player if player and player.phase=='receiving' else None
+
     def preview_tick(self):
         fresh=time.monotonic()-getattr(self.video,'last_image_at',0)<=3
-        if not fresh or self.video.image.isNull():
+        if self.video is None or not fresh or self.video.image.isNull():
             if not self.source.isNull():
                 self.source=QImage();self.overlay=QImage();self.lab=self.rgb=None;self.serial+=1
                 self.source_label='Нет свежего видео — live-маска скрыта.'
@@ -219,8 +200,8 @@ class VisionTuning(QObject):
         required=[f'vision.{self.profile}.{axis}_{suffix}' for axis in ('l','a','b') for suffix in ('min','max')]
         if self.busy or any(k not in self.values for k in required):
             self.notice='Сначала загрузите настройки и выберите цветовой фильтр.';self.changed.emit();return
-        if self.video.image.isNull() or time.monotonic()-getattr(self.video,'last_image_at',0)>3:
-            self.notice='Нет свежего QImage. Запустите runtime-видео с выводом appsink → QImage.';self.changed.emit();return
+        if self.video is None or self.video.image.isNull() or time.monotonic()-getattr(self.video,'last_image_at',0)>3:
+            self.notice='Нет свежего QImage. Запросите видео в панели «Стримы» и выберите активный приёмник.';self.changed.emit();return
         from .lab_preview import pixels,rgb_lab
         self.source=self.video.image.scaled(640,520,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
         self.rgb=pixels(self.source);self.lab=rgb_lab(self.rgb)

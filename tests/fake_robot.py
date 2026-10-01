@@ -36,6 +36,8 @@ class FakeRobot:
         self.head = {"pan": 0, "tilt": 0}
         self.subscriptions = {}
         self.streams = {}
+        self.camera_running = False
+        self.camera_exposure = 8000
         self.localisation_enabled = False
         self.localisation_running = False
         self.localisation_age = 10
@@ -159,12 +161,31 @@ class FakeRobot:
                         result=dict(candidate=[-1.2,-.8,.4],valid=False,fit_state=getattr(self,'localisation_fit','weak'),
                                     lines=5,circle=True,inlier_fraction=.4,median_residual_m=.15,
                                     frame_sequence=123) if self.localisation_running else None)
+        if op == "camera.capabilities":
+            return dict(sensor=dict(width=1600,height=1300,depth=10),
+                        output=dict(width=800,height=650,format="BGR"),geometry_mutable=False,
+                        imu_required=True,frame_duration_us=dict(min=8333,max=100000,default=16667))
+        if op == "camera.controls.list":
+            return dict(items=[dict(key="camera.exposure_us",type="int",min=1,max=16667,
+                                    default=8000,value=self.camera_exposure,supported=None,
+                                    description="Выдержка, мкс")],next_offset=None)
+        if op in ("camera.controls.set","camera.controls.save"):
+            self.camera_exposure=body["values"]["camera.exposure_us"]
+            return dict(values=body["values"],saved=op.endswith("save"))
+        if op in ("camera.start","camera.stop","camera.status"):
+            if op!="camera.status":
+                assert body["lease_epoch"]==self.lease
+                self.camera_running=op=="camera.start"
+            return dict(running=self.camera_running,sequence=12,frame_duration_us=16667,
+                        requested_controls=dict(exposure_us=self.camera_exposure),
+                        imu_sync=dict(state="synced" if self.camera_running else "idle"),error=None)
         if op == "videostream.sources":
-            items=[dict(id=k,available=False,reason="camera_stopped") for k in ("direct-gst","runtime","localisation")]
+            available={"direct-gst":not self.camera_running,"runtime":self.camera_running,"localisation":self.localisation_running}
+            items=[dict(id=k,name=k,available=available[k],reason="" if available[k] else "producer_unavailable", stream_settings=dict(codecs=["jpeg","h264"],max_fps=[1,120],max_size=[1600,1300] if k=="direct-gst" else [800,650],jpeg_alignment=8)) for k in available]
             start=body.get("offset",0);limit=body.get("limit",1)
             return dict(items=items[start:start+limit],next_offset=start+limit if start+limit<len(items) else None)
         if op == "videostream.list":
-            items=[dict(stream_id=k,source=v["spec"]["source"],state=v["state"]) for k,v in self.streams.items()]
+            items=[dict(stream_id=k,source=v["spec"]["source"],state=v["state"],run_id=v["run_id"],receivers=v["receivers"],attached=v["attached"]) for k,v in self.streams.items()]
             start=body.get("offset",0);limit=body.get("limit",4)
             return dict(items=items[start:start+limit],next_offset=start+limit if start+limit<len(items) else None)
         if op == "videostream.capabilities":
@@ -189,6 +210,14 @@ class FakeRobot:
             stream=self.streams[body["stream_id"]]
             stream.update(state="stopped", attached=False, receivers=0)
             return stream.copy()
+        if op == "videostream.stop":
+            self.streams[body["stream_id"]].update(state="stopped",attached=False,receivers=0)
+            return self.streams[body["stream_id"]].copy()
+        if op == "videostream.update":
+            item=self.streams[body["stream_id"]]
+            if "max_fps" in body:item["spec"]["max_fps"]=body["max_fps"]
+            if "bitrate" in body:item["spec"]["codec"]["bitrate"]=body["bitrate"]
+            return item.copy()
         if op == "videostream.status":
             return self.streams[body["stream_id"]].copy()
         if op == "videostream.destroy":

@@ -7,9 +7,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QImage
 from operator_gui.lab_preview import rgb_lab
 from operator_gui.vision_tuning import VisionTuning
-from operator_gui.video import video_request
 from tests.test_field_editor import Session,Control
-from tests.test_video import SETTINGS
 
 
 class TuningTests(unittest.TestCase):
@@ -19,8 +17,9 @@ class TuningTests(unittest.TestCase):
     def setUp(self):
         self.session=Session();self.control=Control()
         image=QImage(80,65,QImage.Format.Format_RGB888);image.fill(0xff208030)
-        self.video=SimpleNamespace(image=image,last_image_at=time.monotonic(),backend='runtime',image_serial=7)
-        self.model=VisionTuning(self.session,self.control,self.video)
+        self.video=SimpleNamespace(image=image,last_image_at=time.monotonic(),backend='runtime',image_serial=7,phase='receiving')
+        self.model=VisionTuning(self.session,self.control,SimpleNamespace(players={'stream':self.video}))
+        self.model.selectStream('stream')
         self.model.profile='green_field';self.model.profiles=['green_field']
         for axis,lo,hi in [('l',0,100),('a',-128,127),('b',-128,127)]:
             for suffix,value in [('min',lo),('max',hi)]:
@@ -33,23 +32,6 @@ class TuningTests(unittest.TestCase):
         assert np.allclose(values[0],[0,0,0],atol=.01)
         assert np.allclose(values[1],[100,0,0],atol=.03)
         assert np.allclose(values[2],[53.24,80.09,67.20],atol=.05)
-
-    def test_freeze_is_unsaved_and_camera_apply_save_are_distinct(self):
-        key='camera.exposure_us'
-        self.model.metas[key]={'type':'int','min':1,'max':16667,'default':8000}
-        self.model.values[key]=8000
-        self.model.response('camera.controls.freeze',{'values':{key:7000},'source_sequence':42},'tuning:freeze')
-        assert self.model.values[key]==8000 and self.model.drafts[key]==7000
-        self.model.applyCamera()
-        assert self.control.commands[-1][0]==('camera.controls.set',{'values':{key:7000}})
-        self.model.save('camera')
-        assert self.control.commands[-1][0]==('camera.controls.save',{'values':{key:7000}})
-
-    def test_camera_controls_catalog_keeps_unknown_support_and_pages(self):
-        self.model.response('camera.controls.list',{'items':[{'key':'camera.ae_enabled','type':'bool','value':False,'supported':None}], 'next_offset':2},'tuning:controls')
-        assert self.model.metas['camera.ae_enabled']['supported'] is None
-        assert self.session.requests[-1][0]=='camera.controls.list'
-        assert self.session.requests[-1][1]=={'offset':2,'limit':2}
 
     def test_preview_and_eyedropper_are_drafts_only(self):
         self.model.snapshot();assert not self.model.overlay.isNull()
@@ -73,10 +55,6 @@ class TuningTests(unittest.TestCase):
         self.model.failed('params.set','conflict: reload','tuning:save')
         assert self.model.drafts and 'conflict' in self.model.notice
 
-    def test_runtime_video_does_not_send_sensor_config(self):
-        spec=video_request(SETTINGS|{'backend':'runtime','sensorWidth':'ignored','depth':'ignored'})
-        assert spec['source']=='runtime' and 'sensor' not in spec
-
     def test_invalid_click_has_no_effect(self):
         self.model.snapshot();self.model.pick(-.1,.3,8)
         assert not self.model.drafts
@@ -84,7 +62,6 @@ class TuningTests(unittest.TestCase):
     def test_status_poll_does_not_rebuild_slider_catalog(self):
         emitted=[];self.model.catalogChanged.connect(lambda:emitted.append(True))
         self.model.status()
-        self.model.response('camera.status',{},'tuning:status')
         self.model.response('detection.status',{},'tuning:status')
         assert not self.model.busy and not emitted
 

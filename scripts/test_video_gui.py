@@ -36,7 +36,7 @@ class MediaRobot(FakeRobot):
             spec = result["spec"]
             jpeg = spec["codec"]["name"] == "jpeg"
             encode = ("jpegenc ! rtpjpegpay pt=26" if jpeg else
-                      "x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30 ! rtph264pay pt=96 config-interval=1")
+                      "openh264enc bitrate=2000000 gop-size=30 ! h264parse ! rtph264pay pt=96 config-interval=1")
             launch = ("videotestsrc is-live=true pattern=smpte ! video/x-raw,format=I420,width=800,height=648,framerate=30/1 "
                       f"! {encode} ssrc=1234 ! udpsink host=127.0.0.1 port={body['rtp_port']} sync=false")
             self.pipeline = self.Gst.parse_launch(launch)
@@ -68,13 +68,13 @@ def main():
     with tempfile.TemporaryDirectory() as state, (output / "robot.log").open("w") as log:
         robot = MediaRobot()
         control_port, video_port = robot.port, port()
-        controller = Controller("127.0.0.1", control_port, output)
+        controller = Controller("127.0.0.1", control_port, Path(state))
         engine = create_engine(controller)
         warnings = []
         engine.warnings.connect(lambda items: warnings.extend(str(i) for i in items))
         engine.load(QUrl.fromLocalFile(str(ROOT / "qml" / "Operator.qml")))
         window = engine.rootObjects()[0]
-        image_dock = window.findChild(QObject, "imageDock")
+
 
         def run():
             try:
@@ -84,51 +84,86 @@ def main():
                 wait_until(lambda: controller.control.owns)
                 controller.control.enterManual()
                 wait_until(lambda: controller.control.view["manual"] and not controller.control.pending)
-                video = controller.video
-                video.getCapabilities()
-                wait_until(lambda: bool(video.capabilities))
+                manager = controller.streams
+                manager.refresh()
+                wait_until(lambda: len(manager.sources)==3 and bool(manager.capabilities))
+                first = controller.video_views.add("")
+                second = controller.video_views.add("")
+                image_dock = window.findChild(QObject, "viewDock-" + first)
+                item = window.findChild(QObject, "viewImage-" + first)
+                other = window.findChild(QObject, "viewImage-" + second)
+                assert item and other and image_dock
+                QMetaObject.invokeMethod(image_dock,"setAsCurrentTab")
                 choices = (("jpeg", "jpegdec"), ("h264", "avdec_h264"))
                 if sys.platform != "darwin": choices = (("h264", "vah264dec"), ("jpeg", "vajpegdec")) + choices
                 for codec, decoder in choices:
-                    video.start(dict(sensorWidth=1600, sensorHeight=1300, depth=10, width=800,
-                                     height=648, fps=30, codec=codec, bitrate=2000000,
-                                     port=video_port, decoder=decoder))
+                    QMetaObject.invokeMethod(image_dock, "open")
+                    QMetaObject.invokeMethod(image_dock, "setAsCurrentTab")
+                    previous = manager.last_created
+                    manager.create(dict(source="direct-gst",sensorWidth=1600,sensorHeight=1300,depth=10,
+                                        width=800,height=648,fps=30,codec=codec,bitrate=2000000))
+                    wait_until(lambda: manager.last_created != previous and not manager.busy(manager.last_created))
+                    ident = manager.last_created
+                    manager.connectStream(ident,video_port,decoder,True)
+                    wait_until(lambda: ident in manager.players)
+                    video = manager.players[ident]
+                    controller.video_views.select(first,ident)
+                    controller.video_views.select(second,ident)
                     wait_until(lambda: video.view["frames"] >= 30 or bool(video.error), 15000)
                     assert not video.error, video.error
                     assert video.view["size"] == "800x648", video.view
                     wait_until(lambda: video.view["fps"] is not None and 25 < video.view["fps"] < 35, 5000)
                     assert not warnings, warnings
-                    assert video.item.window() == window
+                    assert item.window() == window
                     stream_id = video.info["stream_id"]
-                    before = video.imageSerial
+                    before = video.image_serial
                     image_dock.setProperty("isFloating", True)
-                    wait_until(lambda: video.item.window() != window and video.imageSerial > before + 5)
+                    wait_until(lambda: item.window() != window and video.image_serial > before + 5)
                     assert video.info["stream_id"] == stream_id
-                    assert video.item.window().grabWindow().save(str(output / f"{len(report['cycles'])}-floating.png"))
-                    before = video.imageSerial
+                    assert item.window().grabWindow().save(str(output / f"{len(report['cycles'])}-floating.png"))
+                    before = video.image_serial
                     image_dock.setProperty("isFloating", False)
-                    wait_until(lambda: video.item.window() == window and video.imageSerial > before + 5)
+                    wait_until(lambda: item.window() == window and video.image_serial > before + 5)
                     QMetaObject.invokeMethod(image_dock, "forceClose")
-                    before = video.imageSerial
-                    wait_until(lambda: video.imageSerial > before + 5)
+                    before = video.image_serial
+                    wait_until(lambda: video.image_serial > before + 5)
                     QMetaObject.invokeMethod(image_dock, "open")
                     QMetaObject.invokeMethod(image_dock, "setAsCurrentTab")
                     assert video.info["stream_id"] == stream_id
-                    frame = video.item.window().grabWindow()
+                    frame = item.window().grabWindow()
                     assert frame.save(str(output / f"{len(report['cycles'])}-{codec}.png"))
                     report["cycles"].append(dict(codec=codec, decoder=decoder, fps=video.view["fps"], frames=video.view["frames"], size=video.view["size"]))
                     print("PASS", report["cycles"][-1], flush=True)
-                    video.closeWindow()
-                    before = video.imageSerial
-                    wait_until(lambda: video.imageSerial > before + 5)
+                    QMetaObject.invokeMethod(image_dock, 'forceClose')
+                    before = video.image_serial
+                    wait_until(lambda: video.image_serial > before + 5)
                     assert video.info["stream_id"] == stream_id
-                    video.stop()
-                    wait_until(lambda: not video.info and not video.pending and not video.local_busy, 5000)
+                    assert other.property("source") == item.property("source")
+                    assert len([p for p in manager.players.values() if p.phase == "receiving"]) == 1
+                    manager.detach(ident)
+                    wait_until(lambda: video.phase=="stopped" and not manager.busy(ident), 5000)
+                    wait_until(lambda: not str(item.property("source").toString()))
                     assert not image_dock.property("isOpen")
+                QMetaObject.invokeMethod(window, "saveLayout")
+                before=len([m for m in robot.requests if m['op'].startswith('videostream.') and m['op'] not in ('videostream.status','videostream.list')])
+                controller.video_views.remove(first)
+                controller.video_views.remove(second)
+                QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                wait_until(lambda:window.findChild(QObject,"viewDock-"+first) is None)
+                QMetaObject.invokeMethod(window, "restoreLayout")
+                assert {e["id"] for e in controller.video_views.entries}=={first,second}
+                assert all(e["stream"]=="" for e in controller.video_views.entries)
+                assert window.findChild(QObject,"viewDock-"+first) is not None
+                assert before==len([m for m in robot.requests if m['op'].startswith('videostream.') and m['op'] not in ('videostream.status','videostream.list')])
+                assert not warnings,warnings
                 assert not robot.errors, robot.errors
                 report["passed"] = True
             except Exception:
                 report["error"] = traceback.format_exc()
+                report["robot_errors"] = robot.errors
+                report["model"] = controller.streams.view
+                report["requests"] = [m['op'] for m in robot.requests[-30:]]
+                report["log"] = list(controller.history)[-20:]
                 print(report["error"], flush=True)
             finally:
                 report["warnings"] = warnings

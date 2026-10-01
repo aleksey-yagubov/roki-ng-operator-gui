@@ -98,7 +98,7 @@ class LocalisationTests(unittest.TestCase):
         self.session.response.emit('localisation.status', {'running': False, 'error': None}, 'localisation:status')
         self.assertIn('Проверка успешна', self.model.view['notice'])
         self.assertIn('доступна', self.model.view['status'])
-        self.assertIn('Камера + IMU', self.model.view['notice'])
+        self.assertIn('панели «Камера»', self.model.view['notice'])
         self.assertFalse(self.control.commands)
 
     def test_capability_check_starts_bounded_status_updates(self):
