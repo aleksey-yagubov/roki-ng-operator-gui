@@ -166,10 +166,14 @@ ApplicationWindow {
     }
     footer: ToolBar {
         Label {
+            objectName: "batteryStatus"
             width: parent.width
             padding: 5
-            text: backend.view.connected ? (controls.view.owns ? "Управление получено. " : "Наблюдение. ") + "Аккумулятор: нет данных. RTT: " + backend.view.rtt + " мс"
+            text: backend.view.connected ? (controls.view.owns ? "Управление получено. " : "Наблюдение. ") + "Аккумулятор: " + dataSources.power.text + ". RTT: " + backend.view.rtt + " мс"
                                         : "Нет актуальной связи с роботом. Отображаемые снимки могут быть устаревшими."
+            HoverHandler { id: powerHover }
+            ToolTip.visible: powerHover.hovered
+            ToolTip.text: dataSources.power.details
             wrapMode: Text.Wrap
         }
     }

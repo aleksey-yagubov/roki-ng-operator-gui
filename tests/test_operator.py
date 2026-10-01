@@ -56,13 +56,17 @@ class OperatorTests(unittest.TestCase):
         self.controller.connectRobot("127.0.0.1", self.robot.port)
         wait_until(lambda: self.controller.transport.connected)
         wait_until(lambda: any(m["op"] == "log.subscribe" for m in self.robot.requests))
+        wait_until(lambda: "body.power" in self.controller.data_sources.active)
 
     def test_connection_is_observation_and_worker_is_separate(self):
         QTest.qWait(150)
         self.assertEqual(self.robot.requests, [])
         self.connect()
         wait_until(lambda: any(m["op"] == "session.heartbeat" for m in self.robot.requests))
-        self.assertEqual({m["op"] for m in self.robot.requests}, {"hello", "log.subscribe", "session.heartbeat"})
+        self.assertEqual({m["op"] for m in self.robot.requests},
+                         {"hello", "log.subscribe", "session.heartbeat", "data.subscribe"})
+        self.assertEqual([m["body"] for m in self.robot.requests if m["op"] == "data.subscribe"],
+                         [{"topic": "body.power", "rate_hz": 1}])
         self.assertEqual(self.controller.transport.session, 2**60 + 123)
         self.assertNotEqual(self.controller.transport.worker.thread(), QThread.currentThread())
         self.assertEqual(self.controller.logs.thread(), QThread.currentThread())

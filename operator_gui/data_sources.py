@@ -1,10 +1,10 @@
-"""Read-only datastream inspector. No implicit subscriptions or hardware startup."""
+"""Read-only datastream inspector with one automatic body.power subscription."""
 
 import json
 import math
 import time
 
-from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Property, QTimer, Qt, Signal, Slot
 
 from .models import Rows
 
@@ -44,6 +44,11 @@ class DataSources(QObject):
         self.sequences = {}
         self.gaps = {}
         self.error = ""
+        self.power_error = ""
+        self.power_expiry = QTimer(self)
+        self.power_expiry.setSingleShot(True)
+        self.power_expiry.setTimerType(Qt.TimerType.PreciseTimer)
+        self.power_expiry.timeout.connect(self.changed.emit)
         session.response.connect(self.response)
         session.failed.connect(self.failed)
         session.changed.connect(self.connection)
@@ -52,6 +57,43 @@ class DataSources(QObject):
         self.clock.setInterval(1000)
         self.clock.timeout.connect(self.changed.emit)
         self.clock.start()
+
+    @Property("QVariantMap", notify=changed)
+    def power(self):
+        sample, received = self.samples.get("body.power", ({}, None))
+        data = sample.get("data", {})
+        age = sample.get("age_ms")
+        numeric = lambda value: type(value) in (int, float) and math.isfinite(value)
+        age = age + max(0., time.monotonic() - received) * 1000 if (
+            numeric(age) and age >= 0 and received is not None) else None
+        voltage = data.get("voltage_v")
+        stale = age is not None and age >= 3000
+        valid = (self.session.connected and sample.get("valid") is True
+                 and data.get("valid") is not False and not data.get("error")
+                 and numeric(voltage) and voltage >= 0 and age is not None and not stale)
+        simulated = data.get("simulated") is True
+        text = (f"{voltage:.2f} В" if valid else "нет связи" if not self.session.connected
+                else "данные устарели" if stale else "нет данных")
+        if simulated:
+            text += " (симуляция)"
+        raw = data.get("adc_raw")
+        if type(raw) is not int or not 0 <= raw <= 65535:
+            raw = None
+        details = ("Напряжение, не процент заряда.\n"
+                   f"ADC: {raw if raw is not None else 'нет данных'}\n"
+                   f"Возраст: {round(age) if age is not None else 'неизвестен'} мс")
+        error = data.get("error") or self.power_error
+        if error:
+            details += "\n" + str(error)
+        if "body.power" not in self.wanted:
+            details += "\nПодписка отключена; включается в «Источниках данных»."
+        return dict(text=text, valid=valid, stale=stale, simulated=simulated,
+                    voltage=voltage if valid else None, adcRaw=raw, ageMs=age, details=details)
+
+    def subscribe_power(self):
+        if self.session.connected:
+            self.wanted.add("body.power")
+            self.request("data.subscribe", {"topic": "body.power", "rate_hz": 1}, "body.power")
 
     @Property("QVariantList", notify=topicsChanged)
     def catalog(self):
@@ -78,6 +120,8 @@ class DataSources(QObject):
             return
         self.pending.add(key)
         self.error = ""
+        if topic == "body.power":
+            self.power_error = ""
         self.session.request(op, body, topic)
         self.changed.emit()
 
@@ -167,9 +211,14 @@ class DataSources(QObject):
 
     def _sample(self, body):
         topic = body.get("topic")
-        if topic not in {m["name"] for m in self.topics} or not isinstance(body.get("data"), dict):
+        if (topic != "body.power" and topic not in {m["name"] for m in self.topics}) or not isinstance(body.get("data"), dict):
             return
         self.samples[topic] = (dict(body), time.monotonic())
+        if topic == "body.power":
+            self.power_expiry.stop()
+            age = body.get("age_ms")
+            if type(age) in (int, float) and math.isfinite(age) and 0 <= age < 3000:
+                self.power_expiry.start(max(1, math.ceil(3000 - age)))
         if topic == self.selected:
             self.rows.replace(fields(body["data"]))
 
@@ -180,11 +229,16 @@ class DataSources(QObject):
         if op.startswith("data."):
             self.pending.discard((op, topic))
             self.error = f"{op}: {message}"
+            if topic == "body.power":
+                self.power_error = self.error
             self.changed.emit()
 
     @Slot()
     def connection(self):
         if not self.session.connected:
+            self.power_expiry.stop()
+            self.samples.pop("body.power", None)
+            self.power_error = ""
             self.wanted.clear()
             self.active.clear()
             self.pending.clear()
@@ -201,16 +255,26 @@ class DataSources(QObject):
         self.sequences.clear()
         self.gaps.clear()
         self.error = ""
+        self.power_error = ""
+        self.power_expiry.stop()
         self.rows.replace([])
         self.topicsChanged.emit()
         self.changed.emit()
+
+        # Status telemetry only: no catalog request, lease, camera or IMU startup.
+        self.subscribe_power()
 
     @Slot()
     def barrier(self):
         # Urgent motion commands retire queued normal requests. Keep subscription
         # intent so an uncertain subscribe can still be explicitly unsubscribed.
+        restore_power = ("data.subscribe", "body.power") in self.pending
         self.pending.clear()
         self.changed.emit()
+        if restore_power:
+            # Queue after the urgent control command, not before interrupt().
+            QTimer.singleShot(0, self.subscribe_power)
 
     def shutdown(self):
+        self.power_expiry.stop()
         self.clock.stop()

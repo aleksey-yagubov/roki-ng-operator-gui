@@ -119,9 +119,26 @@ def main():
             click("connectButton")
             wait_until(lambda: backend.transport.connected)
             wait_until(lambda: any(m["op"] == "session.heartbeat" for m in robot.requests))
-            assert {m["op"] for m in robot.requests} <= {"hello", "session.heartbeat", "log.subscribe"}
+            assert {m["op"] for m in robot.requests} <= {"hello", "session.heartbeat", "log.subscribe", "data.subscribe"}
+            wait_until(lambda: "body.power" in backend.data_sources.active)
+            robot.send_data("body.power", 1)
+            battery = item("batteryStatus")
+            wait_until(lambda: "12.04 В" in battery.property("text"))
+            assert "симуляция" in battery.property("text")
+            assert robot.subscriptions == {"body.power": 1}
             snapshot("02-connected-no-side-effects")
             show("statusDock")
+            assert "12.04 В" in item("batteryPanelStatus").property("text")
+            robot.power_sample["age_ms"] = 2900
+            robot.send_data("body.power", 2)
+            wait_until(lambda: "данные устарели" in battery.property("text"))
+            assert "данные устарели" in item("batteryPanelStatus").property("text")
+            robot.power_sample["valid"] = False
+            robot.power_sample["age_ms"] = 0
+            robot.power_sample["data"]["voltage_v"] = None
+            robot.send_data("body.power", 3)
+            wait_until(lambda: "нет данных" in battery.property("text"))
+            assert "0.00" not in battery.property("text")
             click("statusButton")
             wait_until(lambda: backend.last_status_at is not None)
             click("capabilitiesButton")
@@ -175,8 +192,8 @@ def main():
             assert item("parameterDetailScroll").height() < item("parametersList").parentItem().height() * 0.65
             show("dataDock")
             click("dataListButton")
-            wait_until(lambda: len(backend.data_sources.topics) == 4)
-            assert not backend.data_sources.wanted
+            wait_until(lambda: len(backend.data_sources.topics) == 5)
+            assert backend.data_sources.wanted == {"body.power"}
             click("dataSnapshotButton")
             wait_until(lambda: backend.data_sources.view["received"])
             click("dataSubscribeButton")
@@ -185,7 +202,7 @@ def main():
             wait_until(lambda: backend.data_sources.sequences.get("system.workers") == 1)
             snapshot("06-data-sources")
             click("dataUnsubscribeButton")
-            wait_until(lambda: not backend.data_sources.wanted)
+            wait_until(lambda: backend.data_sources.wanted == {"body.power"})
             assert robot.owner is None and robot.mode == "GAME"
             window.resize(max(800, window.minimumWidth()), max(700, window.minimumHeight()))
             settle()

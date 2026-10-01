@@ -43,7 +43,7 @@ ScrollView {
         }
         Label { text: backend.view.connection; font.bold: true }
         Label {
-            text: "После подключения: сессия, heartbeat и журнал. Управление не захватывается, камера не запускается, каталоги не запрашиваются."
+            text: "После подключения: сессия, heartbeat, журнал и напряжение аккумулятора (1 Гц). Управление не захватывается, камера и IMU не запускаются, каталоги не запрашиваются."
             wrapMode: Text.Wrap
             Layout.fillWidth: true
         }

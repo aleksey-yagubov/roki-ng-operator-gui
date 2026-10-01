@@ -35,6 +35,8 @@ class FakeRobot:
         self.values = {}
         self.head = {"pan": 0, "tilt": 0}
         self.subscriptions = {}
+        self.power_sample = dict(valid=True, age_ms=5, data=dict(
+            voltage_v=12.04, adc_raw=3253, valid=True, simulated=True, error=None))
         self.streams = {}
         self.camera_running = False
         self.camera_exposure = 8000
@@ -68,6 +70,8 @@ class FakeRobot:
                     travel_m=0., job_id=None)
 
     def sample(self, topic):
+        if topic == "body.power":
+            return dict(topic=topic, **self.power_sample)
         data = ({"camera": {"alive": True, "state": "idle"}} if topic == "system.workers"
                 else self.game_state() if topic == "game.state"
                 else {"head": dict(self.head)} if topic == "motion.state"
@@ -225,7 +229,8 @@ class FakeRobot:
             return dict(stream_id=body["stream_id"], state="destroyed")
         if op == "data.list":
             return {"items": [dict(name=t, kind="state", max_rate_hz=10, schema=1)
-                              for t in ("system.workers", "motion.state", "camera.state", "detection.state")]}
+                              for t in ("system.workers", "motion.state", "camera.state", "detection.state")]
+                    + [dict(name="body.power", kind="state", max_rate_hz=1, schema=1)]}
         if op == "data.snapshot":
             return self.sample(body["topic"])
         if op == "data.subscribe":

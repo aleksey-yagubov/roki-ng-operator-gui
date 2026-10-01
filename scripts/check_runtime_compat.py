@@ -63,7 +63,7 @@ def main():
                 data.select(topic["name"])
                 data.snapshot()
                 wait_until(lambda: data.view["received"] and not data.view["busy"])
-                data.subscribe(2)
+                data.subscribe(min(2, topic["max_rate_hz"]))
                 wait_until(lambda: data.view["active"] and data.sequences.get(data.selected, 0) > 0)
                 data.unsubscribe()
                 wait_until(lambda: not data.view["watching"])

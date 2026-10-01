@@ -19,7 +19,15 @@ ScrollView {
         Label { text: "Робот: " + backend.view.robot; Layout.fillWidth: true; wrapMode: Text.Wrap }
         Label { text: "Режим: " + backend.view.mode + (backend.view.connected ? "" : " (неактуально)"); Layout.fillWidth: true; wrapMode: Text.Wrap }
         Label { text: "Владелец управления: " + backend.view.owner; Layout.fillWidth: true; wrapMode: Text.Wrap }
-        Label { text: "Аккумулятор: нет измеренных данных"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        Label {
+            objectName: "batteryPanelStatus"
+            text: "Аккумулятор: " + dataSources.power.text
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            HoverHandler { id: powerHover }
+            ToolTip.visible: powerHover.hovered
+            ToolTip.text: dataSources.power.details
+        }
         Label { text: "Возраст снимка: " + backend.view.statusAge + " с" }
         Repeater {
             model: workersModel
