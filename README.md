@@ -12,6 +12,11 @@ msgpack, затем запускайте из корня проекта. GStream
 Проверялась установка с системными PySide6/Qt; совместимость с другой копией Qt
 из pip не гарантируется. [Состав и ограничения бинарников](native/README.md).
 
+Для **Windows** собственная инструкция: [docs/WINDOWS.md](docs/WINDOWS.md).
+KDDockWidgets собирается локально (`scripts/windows/build_windows.py`),
+видео — через официальный GStreamer MSVC и PyGObject из gvsbuild, для H.264
+есть аппаратное декодирование (d3d11h264dec по умолчанию, nvh264dec на NVIDIA).
+
 ```sh
 python roki_operator.py --robot 172.30.0.1
 ```
