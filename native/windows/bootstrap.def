@@ -1,0 +1,4 @@
+LIBRARY roki_docking_bootstrap
+EXPORTS
+    roki_docking_qt_version
+    roki_docking_initialize

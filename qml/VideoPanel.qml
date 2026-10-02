@@ -139,7 +139,7 @@ ScrollView {
             Label { text: "Декодер ПК" }
             ComboBox {
                 id: decoder; objectName: "videoDecoder"
-                model: Qt.platform.os === "linux" ? ["vah264dec", "avdec_h264"] : ["avdec_h264"]
+                model: Qt.platform.os === "linux" ? ["vah264dec", "avdec_h264"] : (Qt.platform.os === "windows" ? ["d3d11h264dec", "nvh264dec", "avdec_h264"] : ["avdec_h264"])
                 Layout.fillWidth: true; enabled: !root.reception.active && !root.busy
             }
             CheckBox { id: autoPort; text: "Автоматический UDP-порт"; checked: true }

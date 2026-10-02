@@ -1,16 +1,24 @@
 """GStreamer receiver, isolated from the control socket and the Qt GUI thread."""
 
 import socket
+import sys
 import time
 import threading
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
 
+if sys.platform == "win32":
+    # Direct3D 11 декодеры работают на любом GPU с DX11 (включая встройку Intel);
+    # nvh264dec — аппаратный NVDEC на картах NVIDIA. avdec_h264 — программный запасной вариант.
+    DECODER_CHOICES = {"H264": ("d3d11h264dec", "nvh264dec", "avdec_h264")}
+else:
+    DECODER_CHOICES = {"H264": ("vah264dec", "avdec_h264")}
+
 
 def receiver_description(info, decoder, latency):
     codec = info["encoding_name"]
-    choices = {"H264": ("vah264dec", "avdec_h264")}
+    choices = DECODER_CHOICES
     if codec not in choices or decoder not in choices[codec]:
         raise ValueError("Декодер не соответствует кодеку")
     pt = int(info["payload_type"])
