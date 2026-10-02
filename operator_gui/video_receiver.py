@@ -96,6 +96,9 @@ class MediaWorker(QObject):
     @Slot(object)
     def start(self, settings):
         try:
+            if sys.platform == "win32":
+                from operator_gui.gst_windows import prepare as prepare_gst_windows
+                prepare_gst_windows()
             import gi
             gi.require_version("Gst", "1.0")
             gi.require_version("GstVideo", "1.0")

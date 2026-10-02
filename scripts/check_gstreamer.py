@@ -5,6 +5,10 @@ import sys
 import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import sys as _sys
+if _sys.platform == "win32":
+    from operator_gui.gst_windows import prepare as _prepare_gst_windows
+    _prepare_gst_windows()
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst
