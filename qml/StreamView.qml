@@ -19,17 +19,18 @@ ColumnLayout {
         ComboBox {
             objectName: "viewSelector-" + root.viewId
             Layout.fillWidth: true
-            model: streams.view.active
+            model: streams.receivers
             textRole: "label"
             currentIndex: model.findIndex(s => s.id === root.selected)
-            displayText: currentIndex < 0 ? (root.selected ? "Поток недоступен: " + root.selected : "Выберите принимаемый стрим") : currentText
+            enabled: count > 0
+            displayText: currentIndex < 0 ? (root.selected ? "Поток недоступен: " + root.selected : count ? "Выберите принимаемый стрим" : "Нет принимаемых стримов") : currentText
             onActivated: videoViews.select(root.viewId, model[currentIndex].id)
         }
         Button { text: "Удалить просмотр"; onClicked: videoViews.remove(root.viewId) }
     }
     Label {
         text: root.reception.active ? (root.reception.size || "Ожидание кадра") + " · " + (root.reception.fps === undefined || root.reception.fps === null ? "—" : root.reception.fps.toFixed(1)) + " FPS"
-             : root.reception.error || "Нет приёма. Запросите передачу в панели «Стримы»."
+             : root.reception.error || "В панели «Стримы» выберите видеовыход и нажмите «Смотреть», затем выберите его здесь."
         Layout.fillWidth: true; wrapMode: Text.Wrap
     }
     Label { visible: root.reception.stalled || false; text: "Нет новых кадров. Проверьте передачу и UDP."; Layout.fillWidth: true; wrapMode: Text.Wrap }

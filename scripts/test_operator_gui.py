@@ -323,7 +323,7 @@ def main():
                 assert edge.x() <= window.width() and edge.y() <= window.height(), f"Clipped {name}: {edge}; window={window.width()}x{window.height()}, logs_y={item('logsList').mapToScene(QPointF(0,0)).y()}"
             snapshot("11-minimum")
             assert robot.game_running
-            assert not any(m["op"] in ("control.acquire", "mode.set", "videostream.start", "test.start", "motion.pose") for m in robot.requests)
+            assert not any(m["op"] in ("control.acquire", "mode.set", "videostream.subscribe", "test.start", "motion.pose") for m in robot.requests)
             window.resize(1200, 900)
             settle(300)
             right = group.mapToScene(QPointF(group.width(), 0)).x()
@@ -423,10 +423,10 @@ def main():
             snapshot("13-camera-isp-separate")
             show("videoDock")
             click("videoCatalogButton")
-            wait_until(lambda: len(backend.streams.sources)==3 and not backend.streams.view['catalogBusy'])
+            wait_until(lambda: len(backend.streams.names)==3 and not backend.streams.view['catalogBusy'])
             assert not backend.streams.players
             snapshot("13h-video-source-catalog")
-            source=item("streamSource")
+            source=item("videoTransmissionList")
             keyboard=backend.control.keyboard
             backend.control.setKeyboard(False)
             source.forceActiveFocus()
@@ -434,18 +434,35 @@ def main():
             settle(1300)
             assert source.property("currentIndex")==1
             backend.control.setKeyboard(keyboard)
-            assert not item("directCaptureFields").isVisible()
-            click("streamCreate")
-            wait_until(lambda:bool(backend.streams.last_created) and not backend.streams.busy(backend.streams.last_created))
-            stream=backend.streams.last_created
-            assert robot.streams[stream]["spec"]["source"]=="runtime"
-            assert "sensor" not in robot.streams[stream]["spec"]
+            stream="camera"
+            assert backend.streams.detail(stream)["settings"]["height"] == 650
+            assert not backend.streams.editable(stream, "height")
+            assert not item("videoSetting-height").isEnabled()
+            item("videoSetting-fps").findChild(QObject, "valueInput").setProperty("text", "45.5")
+            click("videoApply-fps")
+            wait_until(lambda: robot.streams[stream]['settings']['fps']==45.5 and not backend.streams.pending)
             assert not backend.streams.players
-            click("streamStart")
+            assert not item("openStreamView").isEnabled()
+            click("streamWatch")
             wait_until(lambda:stream in backend.streams.players and backend.streams.players[stream].phase=="receiving")
-            click("addVideoView")
+            show("videoDock")
+            assert not item("videoSetting-fps").isEnabled()
+            assert item("videoSetting-max_fps").isEnabled()
+            item("videoSetting-max_fps").findChild(QObject, "valueInput").setProperty("text", "20.5")
+            click("videoApply-max_fps")
+            wait_until(lambda: robot.streams[stream]['settings']['max_fps']==20.5 and not backend.streams.pending)
+            robot.streams[stream]['receivers'] = 2
+            backend.streams.inspect(stream)
+            wait_until(lambda: backend.streams.detail(stream)['receivers']==2 and not backend.streams.pending)
+            click("streamStop")
+            assert item("videoStopConfirm").property("visible")
+            QMetaObject.invokeMethod(item("videoStopConfirm"), "reject")
+            assert not any(m['op']=='videostream.stop' for m in robot.requests)
+            stream_commands = [m for m in robot.requests if m["op"] == "videostream.subscribe"]
             first=backend.video_views.entries[-1]["id"]
             assert backend.video_views.selected(first)==stream
+            assert item("viewDock-"+first).property("isOpen")
+            assert [m for m in robot.requests if m["op"] == "videostream.subscribe"] == stream_commands
             second=backend.video_views.add(stream)
             assert len(backend.streams.players)==1
             show("viewDock-"+first)

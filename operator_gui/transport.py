@@ -1,4 +1,4 @@
-"""Nonblocking manual-1 UDP transport owned by the Qt event loop."""
+"""Nonblocking operator UDP transport owned by the Qt event loop."""
 
 from collections import deque
 import ipaddress
@@ -14,7 +14,7 @@ LIMIT = 1400
 
 
 def envelope(kind, op, body, ident, session=0, token=0):
-    return dict(v=1, kind=kind, op=op, body=body, id=ident, session=session,
+    return dict(kind=kind, op=op, body=body, id=ident, session=session,
                 token=token, sequence=0, robot_mono_ns=0)
 
 
@@ -24,8 +24,8 @@ def decode(data):
     value = msgpack.unpackb(data, raw=False, strict_map_key=True, max_array_len=256,
                            max_map_len=128, max_str_len=LIMIT, max_bin_len=LIMIT,
                            max_ext_len=0)
-    if not isinstance(value, dict) or value.get("v") != 1:
-        raise ValueError("Unsupported envelope")
+    if not isinstance(value, dict):
+        raise ValueError("Invalid envelope")
     if not isinstance(value.get("body"), dict) or not isinstance(value.get("op"), str):
         raise ValueError("Invalid body/op")
     for key in ("id", "session", "token"):
@@ -106,7 +106,7 @@ class Transport(QObject):
             self.rtt_ms = None
             self.invalid_packets = 0
             self.timer.start()
-            self._send_request("hello", {"versions": [1], "client_name": "roki-ng-operator",
+            self._send_request("hello", {"client_name": "roki-ng-operator",
                                          "client_instance": uuid.uuid4().hex}, "", "hello")
             self.changed.emit()
         except (ValueError, OSError) as exc:
@@ -195,7 +195,7 @@ class Transport(QObject):
         now = time.monotonic()
         self.pending[self.ident] = dict(op=op, context=context, packet=packet, attempts=1,
                                        sent=now, deadline=now + 0.25,
-                                       expires=now + (20.0 if op == "camera.start" else
+                                       expires=now + (20.0 if op in ("camera.start", "videostream.subscribe") else
                                                       7.0 if op in ("localisation.start", "game.start") else 1.25))
         self._write(packet)
 

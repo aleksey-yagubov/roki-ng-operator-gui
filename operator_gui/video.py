@@ -1,60 +1,35 @@
-"""Remote stream definitions and shared local receivers, independent of views."""
-
+"""Named worker outputs and shared H.264 receivers; views never own subscriptions."""
 import time
 from urllib.parse import quote
-
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
-
 from .control import scalar
 from .video_receiver import Receiver, receiver_description
 
+RUNNING = ("starting", "running")
+TRANSITIONAL = ("inspecting", "preparing", "joining", "reconciling")
 
-def video_request(values, source):
-    def number(key, low, high, kind="int"):
-        return scalar(dict(type=kind, min=low, max=high), values[key])
 
-    settings = source.get("stream_settings", {})
-    codec = values["codec"]
-    if codec not in settings.get("codecs", []):
-        raise ValueError("Кодек не поддерживается источником")
-    direct = source["id"] == "direct-gst"
-    maximum = settings.get("max_size", [1600, 1300] if direct else [800, 650])
-    width, height = number("width", 160, maximum[0]), number("height", 120, maximum[1])
-    alignment = settings.get("jpeg_alignment", 8) if codec == "jpeg" else 2
-    if width % alignment or height % alignment:
-        raise ValueError(f"Размеры должны быть кратны {alignment}")
-    low, high = settings.get("max_fps", [1, 120])
-    fps = number("fps", low, high, "float")
-    result = dict(source=source["id"], output=dict(width=width, height=height, fps=fps),
-                  codec=dict(name=codec), mtu=1400)
-    if codec == "h264":
-        result["codec"]["bitrate"] = number("bitrate", 100000, 20000000)
-    if direct:
-        sensor = dict(width=number("sensorWidth", 320, 4096),
-                      height=number("sensorHeight", 240, 4096), depth=number("depth", 8, 10))
-        if sensor["depth"] not in (8, 10) or width > sensor["width"] or height > sensor["height"]:
-            raise ValueError("Неверный режим сенсора или выход больше сенсора")
-        result["sensor"] = sensor
-    else:
-        result["max_fps"] = number("max_fps", low, fps, "float")
-    return result
+def setting_value(meta, value):
+    typed = scalar({k: v for k, v in meta.items() if k != "choices"}, value)
+    if "choices" in meta and typed not in meta["choices"]:
+        raise ValueError("Выберите значение из списка")
+    return typed
 
 
 class Player(QObject):
-    """One decoder per stream. No references to Qt windows or docking items."""
     changed = Signal()
     imageChanged = Signal()
 
-    def __init__(self, manager, ident):
+    def __init__(self, manager, name):
         super().__init__(manager)
-        self.manager, self.ident = manager, ident
+        self.manager, self.ident = manager, name
         self.info, self.media = {}, {}
         self.phase, self.error = "idle", ""
         self.port, self.decoder = 0, ""
-        self.intent = "attach"
         self.generation = 0
         self.receiver = None
+        self.stopping = False
         self.image = QImage()
         self.image_serial = 0
         self.last_image_at = 0.
@@ -63,19 +38,19 @@ class Player(QObject):
 
     @property
     def backend(self):
-        return self.info.get("spec", {}).get("source", "")
+        return self.ident
 
     @Property("QVariantMap", notify=changed)
     def view(self):
-        return dict(streamId=self.ident, phase=self.phase, error=self.error,
-                    source=self.backend, decoder=self.decoder, port=self.port,
-                    active=self.phase == "receiving", fps=self.media.get("fps"),
+        return dict(name=self.ident, phase=self.phase, error=self.error,
+                    source=self.ident, decoder=self.decoder, port=self.port,
+                    active=self.phase == "receiving", stopping=self.stopping, fps=self.media.get("fps"),
                     size=self.media.get("size", ""), frames=self.media.get("frames", 0),
                     stalled=self.media.get("stalled", False))
 
     @Slot(object)
     def receive_image(self, image):
-        if self.phase not in ("preparing", "joining", "receiving"):
+        if self.phase not in ("preparing", "joining", "reconciling", "receiving"):
             return
         self.image = image
         self.image_serial += 1
@@ -96,11 +71,16 @@ class Player(QObject):
 
     def close(self, message=""):
         self.generation += 1
+        self.phase, self.error = "stopped", message
         if self.receiver:
+            self.stopping = True
             self.receiver.stop()
-        self.phase = "stopped"
-        self.error = message
         self.clear_image()
+        self.changed.emit()
+
+    @Slot()
+    def receiver_stopped(self):
+        self.stopping = False
         self.changed.emit()
 
     def shutdown(self):
@@ -111,19 +91,26 @@ class Player(QObject):
 class Streams(QObject):
     changed = Signal()
     framesChanged = Signal()
+    outputsChanged = Signal()
+    receiversChanged = Signal()
+    openView = Signal(str)
 
     def __init__(self, session, control, log, parent=None):
         super().__init__(parent)
         self.session, self.control, self.log = session, control, log
-        self.sources, self.streams = [], []
-        self.details, self.players = {}, {}
-        self.pending = {}
+        self.details, self.players, self.pending = {}, {}, {}
+        self.names, self._outputs, self._receivers = [], [], []
+        self.cleanup = set()
         self.serial = 0
         self.error = ""
-        self.last_created = ""
         self.capabilities = {}
+        self.operations = set()
         self.watching = False
-        self.create_unknown = False
+        self.selected = ""
+        self.boot_id = None
+        self._connected = session.connected
+        self._permissions = (session.connected, control.owns, bool(control.pending))
+        self.changed.connect(self._sync_catalogs)
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.poll)
@@ -131,20 +118,41 @@ class Streams(QObject):
         session.response.connect(self.response)
         session.failed.connect(self.failed)
         session.changed.connect(self.connection)
-        control.changed.connect(self.changed)
+        session.welcomed.connect(self.welcome)
+        control.changed.connect(self.permissions_changed)
         control.barrierIssued.connect(self.barrier)
+
+    @Property("QVariantList", notify=outputsChanged)
+    def outputs(self):
+        return self._outputs
+
+    @Property("QVariantList", notify=receiversChanged)
+    def receivers(self):
+        return self._receivers
+
+    def _sync_catalogs(self):
+        outputs = [dict(name=n, label=f"{self.details[n].get('title', n)} · {n}") for n in self.names]
+        receivers = [dict(id=n, label=self.details.get(n, {}).get("title", n))
+                     for n, p in self.players.items() if p.phase == "receiving"]
+        for attr, value, signal in (("_outputs", outputs, self.outputsChanged),
+                                    ("_receivers", receivers, self.receiversChanged)):
+            if getattr(self, attr) != value:
+                setattr(self, attr, value)
+                signal.emit()
+
+    def permissions_changed(self):
+        permissions = (self.session.connected, self.control.owns, bool(self.control.pending))
+        if permissions != self._permissions:
+            self._permissions = permissions
+            self.changed.emit()
 
     @Property("QVariantMap", notify=changed)
     def view(self):
-        return dict(sources=self.sources, streams=self.streams,
-                    active=[dict(id=k, label=f"{p.backend} · {k}") for k, p in self.players.items()
-                            if p.phase == "receiving"],
-                    busyKeys=[p[0] for p in self.pending.values()], error=self.error,
-                    lastCreated=self.last_created, capabilities=self.capabilities,
+        return dict(active=self._receivers, busyKeys=[p[0] for p in self.pending.values()],
+                    error=self.error, capabilities=self.capabilities,
+                    supported="videostream.subscribe" in self.operations,
                     canManage=self.session.connected and self.control.owns and not self.control.pending,
-                    canCreate=self.session.connected and self.control.owns and not self.control.pending
-                    and not self.busy("create") and not self.create_unknown,
-                    catalogBusy=self.busy("sources") or self.busy("list"))
+                    catalogBusy=self.busy("catalog") or self.busy("operations"))
 
     def busy(self, key):
         return any(p[0] == key for p in self.pending.values())
@@ -154,7 +162,7 @@ class Streams(QObject):
             return False
         self.serial += 1
         context = f"streams:{self.serial}"
-        self.pending[context] = (key, success, failure, op)
+        self.pending[context] = (key, success, failure)
         self.session.request(op, body, context)
         self.changed.emit()
         return True
@@ -164,151 +172,193 @@ class Streams(QObject):
         self.log("ERROR", "Стримы: " + self.error)
         self.changed.emit()
 
-    def permitted(self):
-        if not self.view["canManage"]:
-            self.problem("Нужно получить управление; дождитесь завершения текущей команды.")
-            return False
-        return True
-
-    def catalog(self, kind, limit):
-        if self.busy(kind):
-            return
+    def pages(self, op, key, limit, done):
         items = []
         def page(offset=0):
             def received(result):
-                items.extend(result["items"])
-                cursor = result.get("next_offset")
+                batch, cursor = result["items"], result.get("next_offset")
+                if not isinstance(batch, list) or len(items) + len(batch) > 512:
+                    raise ValueError("Некорректный каталог")
+                items.extend(batch)
                 if cursor is not None:
-                    if cursor <= offset:
-                        self.problem("Некорректная пагинация " + kind)
-                        return
+                    if type(cursor) is not int or cursor <= offset:
+                        raise ValueError("Некорректная пагинация")
                     page(cursor)
                 else:
-                    if kind == "sources":
-                        self.sources = items
-                    else:
-                        self.streams = items
-                        # A paginated list can race creation/deletion. Only the
-                        # per-stream status poll invalidates an active receiver.
-                    self.changed.emit()
-            self.request("videostream." + kind, dict(offset=offset, limit=limit), kind, received)
+                    done(items)
+            self.request(op, dict(offset=offset, limit=limit), key, received)
         page()
 
     @Slot()
     def refresh(self):
-        self.error = ""
-        self.watching = True
-        self.catalog("sources", 1)
-        self.catalog("list", 4)
-        self.request("videostream.capabilities", {}, "capabilities", self.got_capabilities)
+        if not self.session.connected or self.view["catalogBusy"]:
+            return
+        self.error, self.watching = "", True
+        if self.operations:
+            self.catalog()
+        else:
+            def operations(items):
+                self.operations = set(items)
+                required = {"videostream.list", "videostream.status", "videostream.subscribe",
+                            "videostream.unsubscribe", "videostream.update", "videostream.stop"}
+                if not required <= self.operations:
+                    self.operations.clear()
+                    self.watching = False
+                    self.problem("На роботе нет нужных операций videostream. Обновите runtime вместе с GUI.")
+                    return
+                self.request("videostream.capabilities", {}, "capabilities", self.got_capabilities)
+                self.catalog()
+            self.pages("system.operations", "operations", 12, operations)
 
     def got_capabilities(self, result):
         self.capabilities = result
         self.changed.emit()
 
-    @Slot("QVariantMap")
-    def create(self, values):
-        if not self.permitted() or self.busy("create") or self.create_unknown:
+    def catalog(self):
+        if self.busy("catalog"):
             return
-        try:
-            source = next(s for s in self.sources if s["id"] == values["source"])
-            spec = video_request(values, source)
-        except (ValueError, KeyError, TypeError, StopIteration) as exc:
-            self.problem(str(exc) or "Сначала запросите и выберите источник")
-            return
-        def created(result):
-            self.last_created = result["stream_id"]
-            self.remember(result)
-            self.catalog("list", 4)
-        def failed(reason):
-            self.create_unknown = "outcome unknown" in reason
-            self.problem(reason + " Обновите список передач перед повторным созданием.")
-        self.request("videostream.create", dict(spec, lease_epoch=self.control.lease),
-                     "create", created, failed)
-
-    @Slot()
-    def acknowledgeUnknownCreate(self):
-        # Explicit operator acknowledgement; never silently create a duplicate.
-        self.create_unknown = False
-        self.changed.emit()
+        def loaded(items):
+            if not all(isinstance(s, dict) and isinstance(s.get("name"), str)
+                       and isinstance(s.get("settings"), dict) and isinstance(s.get("controls"), dict)
+                       for s in items):
+                raise ValueError("Некорректное описание видеовыхода")
+            names = [s["name"] for s in items]
+            if len(set(names)) != len(names):
+                raise ValueError("Повтор имени видеовыхода")
+            self.names = names
+            for s in items:
+                self.details[s["name"]] = self.details.get(s["name"], {}) | s
+            for n in list(self.details):
+                if n not in names:
+                    del self.details[n]
+                    if n in self.players:
+                        self.players[n].close("Видеовыход больше не объявлен")
+            self.changed.emit()
+            if self.selected in names:
+                self.inspect(self.selected)
+        self.pages("videostream.list", "catalog", 1, loaded)
 
     def remember(self, result):
-        ident = result["stream_id"]
-        self.details[ident] = self.details.get(ident, {}) | result
-        row = dict(stream_id=ident, source=self.details[ident].get("spec", {}).get("source", ""),
-                   **{k: result.get(k) for k in ("state", "run_id", "receivers", "attached")})
-        self.streams = [s for s in self.streams if s["stream_id"] != ident]
-        if result["state"] != "destroyed":
-            self.streams.append(row)
+        name = result["name"]
+        self.details[name] = self.details.get(name, {}) | result
         self.changed.emit()
 
     @Slot(str, result="QVariantMap")
-    def detail(self, ident):
-        return self.details.get(ident, {})
+    def detail(self, name):
+        return self.details.get(name, {})
 
     @Slot(str, result="QVariantMap")
-    def reception(self, ident):
-        p = self.players.get(ident)
+    def reception(self, name):
+        p = self.players.get(name)
         return p.view if p else dict(phase="idle", active=False, error="", frames=0)
 
     @Slot(str, result=str)
-    def imageUrl(self, ident):
-        p = self.players.get(ident)
+    def imageUrl(self, name):
+        p = self.players.get(name)
         if p is None or p.phase != "receiving" or p.image.isNull():
             return ""
-        return f"image://streams/{quote(ident, safe='')}?frame={p.image_serial}"
+        return f"image://streams/{quote(name, safe='')}?frame={p.image_serial}"
+
+    @Slot(str)
+    def select(self, name):
+        self.selected = name
+        if name in self.details:
+            self.inspect(name)
 
     def inspect_result(self, result):
         self.remember(result)
-        p = self.players.get(result["stream_id"])
+        p = self.players.get(result["name"])
         if p and p.phase == "receiving":
-            if result.get("state") not in ("starting", "running") or result.get("attached") is False:
-                p.close("Передача остановлена или получатель отключён")
+            if result.get("state") not in RUNNING or not result.get("subscribed"):
+                p.close(result.get("error") or "Передача остановлена или подписка снята")
             elif (result.get("run_id"), result.get("ssrc")) != (p.info.get("run_id"), p.info.get("ssrc")):
-                p.close("Передача перезапущена. Подключитесь заново.")
-                self.detach(p.ident)
+                p.close("Передача перезапущена. Нажмите «Смотреть» заново.")
+                self.unsubscribe(p.ident)
             else:
                 p.info = result
 
     @Slot(str)
-    def inspect(self, ident):
-        if ident:
-            self.request("videostream.status", dict(stream_id=ident), ident, self.inspect_result,
-                         lambda reason: self.status_failed(ident, reason))
+    def inspect(self, name):
+        if name:
+            self.request("videostream.status", dict(name=name), name, self.inspect_result,
+                         lambda reason: self.status_failed(name, reason))
 
-    def status_failed(self, ident, reason):
-        if "not_found" in reason and ident in self.players:
-            self.players[ident].close(reason)
+    def status_failed(self, name, reason):
+        p = self.players.get(name)
+        if p and p.phase in (*TRANSITIONAL, "receiving"):
+            self.receiver_error(p, reason)
+        else:
+            self.problem(reason)
+
+    @Slot(str, str, result=bool)
+    def editable(self, name, key):
+        info = self.details.get(name, {})
+        meta = info.get("controls", {}).get(key)
+        return bool(self.view["canManage"] and not self.busy(name) and meta
+                    and not meta.get("fixed") and (info.get("state") in ("stopped", "failed")
+                    or (info.get("state") in RUNNING and meta.get("live") is True)))
+
+    @Slot(str, str, "QVariant")
+    def update(self, name, key, value):
+        if not self.editable(name, key):
+            self.problem("Поле недоступно: нужны управление и подходящее состояние выхода.")
+            return
+        try:
+            info = self.details[name]
+            value = setting_value(info["controls"][key], value)
+            settings = info["settings"] | {key: value}
+            if "max_fps" in settings and settings["max_fps"] > settings["fps"]:
+                raise ValueError("max_fps не может превышать fps")
+        except (ValueError, TypeError, KeyError) as exc:
+            self.problem(exc)
+            return
+        def updated(result):
+            self.inspect_result(result)
+            self.inspect(name)
+        self.error = ""
+        self.request("videostream.update", dict(name=name, lease_epoch=self.control.lease,
+                     settings={key: value}), name, updated, lambda reason: self.operation_failed(name, reason))
+
+    def operation_failed(self, name, reason):
         self.problem(reason)
+        self.inspect(name)
 
-    @Slot(str, int, str, bool)
-    def connectStream(self, ident, port, decoder, start):
-        if not ident or self.busy(ident) or not self.session.connected or (start and not self.permitted()):
+    @Slot(str, int, str)
+    def watch(self, name, port, decoder):
+        if (name not in self.details or not self.view["supported"] or not self.session.connected
+                or self.busy(name) or name in self.cleanup):
             return
-        p = self.players.get(ident)
-        if p and p.phase in ("inspecting", "preparing", "joining", "receiving", "detaching"):
+        p = self.players.get(name)
+        if p and p.stopping:
             return
-        if not 1024 <= port <= 65535 or any(q.ident != ident and q.port == port
-                and q.phase in ("inspecting", "preparing", "joining", "receiving", "detaching") for q in self.players.values()):
+        if p and p.phase == "receiving":
+            self.openView.emit(name)
+            return
+        if p and p.phase in TRANSITIONAL:
+            return
+        if (port != 0 and not 1024 <= port <= 65535) or (port and any(
+                q.ident != name and q.port == port and q.phase in (*TRANSITIONAL, "receiving")
+                for q in self.players.values())):
             self.problem("UDP-порт недопустим или занят другим приёмником")
             return
         if p is None:
-            p = self.players[ident] = Player(self, ident)
+            p = self.players[name] = Player(self, name)
         p.generation += 1
         generation = p.generation
-        p.phase, p.error = "inspecting", ""
-        p.port, p.decoder, p.intent = port, decoder, "start" if start else "attach"
+        p.phase, p.error, self.error = "inspecting", "", ""
+        p.port, p.decoder = port, decoder
         p.clear_image()
         def inspected(result):
             if generation != p.generation:
                 return
             self.remember(result)
-            if not start and result["state"] not in ("starting", "running"):
-                p.close("Наблюдатель может подключиться только к запущенной передаче")
+            running = result["state"] in RUNNING
+            if not running and (not self.view["canManage"] or not result.get("available")):
+                p.close(result.get("reason") or "Для запуска получите управление")
                 return
             p.info = result
             info = dict(result, rtp_port=port)
-            if start and result["state"] not in ("starting", "running"):
+            if not running:
                 info["ssrc"] = None
             try:
                 receiver_description(info, decoder, 30)
@@ -316,7 +366,8 @@ class Streams(QObject):
                     p.receiver = Receiver(p)
                     p.receiver.imageReady.connect(p.receive_image)
                     p.receiver.status.connect(p.status)
-                    p.receiver.ready.connect(lambda: self.receiver_ready(p))
+                    p.receiver.stopped.connect(p.receiver_stopped)
+                    p.receiver.ready.connect(lambda bound: self.receiver_ready(p, bound))
                     p.receiver.error.connect(lambda msg: self.receiver_error(p, msg))
                     p.receiver.log.connect(self.log)
                 p.phase = "preparing"
@@ -325,128 +376,136 @@ class Streams(QObject):
             except Exception as exc:
                 self.receiver_error(p, str(exc))
             p.changed.emit()
-        self.request("videostream.status", dict(stream_id=ident), ident, inspected, p.close)
+        self.request("videostream.status", dict(name=name), name, inspected, p.close)
         p.changed.emit()
 
-    def receiver_ready(self, p):
+    def receiver_ready(self, p, port):
         if p.phase != "preparing":
             return
-        if not self.session.connected or (p.intent == "start" and not self.control.owns):
-            p.close("Управление потеряно до запуска")
+        if not self.session.connected or (p.info["state"] not in RUNNING and not self.control.owns):
+            p.close("Нет управления для запуска")
             return
+        p.port = port
         generation = p.generation
-        body = dict(stream_id=p.ident, rtp_port=p.port)
-        if p.intent == "start":
+        body = dict(name=p.ident, rtp_port=port)
+        if self.control.owns:
             body["lease_epoch"] = self.control.lease
+        # Apply settings explicitly via update; never overwrite shared settings
+        # with an old draft during subscribe, including concurrent start races.
         p.phase = "joining"
         def joined(result):
             if generation != p.generation:
-                self.detach(p.ident)
                 return
             self.remember(result)
             p.info = result
-            if result["state"] in ("starting", "running"):
+            if result["state"] in RUNNING and result.get("subscribed"):
                 p.phase = "receiving"
+                self.openView.emit(p.ident)
             else:
-                p.close(result.get("error") or "Передача не запущена")
+                self.receiver_error(p, result.get("error") or "Подписка не подтверждена")
             p.changed.emit()
         def failed(reason):
-            p.close(reason)
-            self.detach(p.ident)
-        self.request("videostream." + p.intent, body, p.ident, joined, failed)
+            if generation != p.generation:
+                return
+            self.problem(reason)
+            if "outcome unknown" in reason:
+                p.phase = "reconciling"
+                self.request("videostream.status", dict(name=p.ident), p.ident, joined,
+                             lambda error: self.receiver_error(p, error))
+            else:
+                p.close(reason)
+                self.inspect(p.ident)
+        self.request("videostream.subscribe", body, p.ident, joined, failed)
         p.changed.emit()
 
     def receiver_error(self, p, message):
         p.close(message)
         self.problem(message)
-        if not self.busy(p.ident):
-            self.detach(p.ident)
+        self.cleanup.add(p.ident)
+        self.flush_cleanup()
 
     @Slot(str)
-    def detach(self, ident):
-        if self.busy(ident):
-            return
-        p = self.players.get(ident)
-        if p:
-            p.close(p.error)
-            p.phase = "detaching"
-        def done(result):
-            self.remember(result)
-            if p:
-                p.phase = "stopped"
-                p.changed.emit()
-        def failed(reason):
-            if p:
-                p.close(reason)
-            self.problem(reason)
-        if not self.request("videostream.detach", dict(stream_id=ident), ident, done, failed) and p:
-            p.close(p.error)
+    def unsubscribe(self, name):
+        if name in self.players:
+            self.players[name].close(self.players[name].error)
+        self.cleanup.add(name)
+        self.flush_cleanup()
 
-    @Slot(str, str)
-    def manage(self, ident, action):
-        if action not in ("stop", "destroy") or not self.permitted():
-            return
-        def done(result):
-            self.remember(result)
-            if ident in self.players:
-                self.players[ident].close("Передача остановлена" if action == "stop" else "Передача удалена")
-            self.catalog("list", 4)
-        self.request("videostream." + action, dict(stream_id=ident, lease_epoch=self.control.lease),
-                     ident, done)
+    def flush_cleanup(self):
+        for name in list(self.cleanup):
+            if self.busy(name) or not self.session.connected:
+                continue
+            self.cleanup.remove(name)
+            self.request("videostream.unsubscribe", dict(name=name), name, self.remember,
+                         lambda reason: self.problem("Отписка не подтверждена: " + reason))
 
-    @Slot(str, str, float)
-    def update(self, ident, key, value):
-        if key not in ("max_fps", "bitrate") or not self.permitted():
+    @Slot(str)
+    def stop(self, name):
+        if not self.view["canManage"] or self.busy(name):
             return
-        try:
-            value = scalar(dict(type="int" if key == "bitrate" else "float",
-                                min=100000 if key == "bitrate" else 1,
-                                max=20000000 if key == "bitrate" else 120), value)
-        except ValueError as exc:
-            self.problem(exc)
-            return
-        self.request("videostream.update", dict(stream_id=ident, lease_epoch=self.control.lease, **{key: value}),
-                     ident, self.inspect_result)
+        self.request("videostream.stop", dict(name=name, lease_epoch=self.control.lease),
+                     name, self.inspect_result, lambda reason: self.operation_failed(name, reason))
 
     def poll(self):
         if not self.session.connected:
             return
-        if self.watching:
-            self.catalog("list", 4)
-        for ident, p in self.players.items():
+        if self.watching and self.operations:
+            self.catalog()
+        for name, p in self.players.items():
             if p.phase == "receiving":
-                self.inspect(ident)
+                self.inspect(name)
 
     def response(self, op, result, context):
+        if op == "system.status" and self.boot_id and result.get("boot_id") != self.boot_id:
+            self.reset(result.get("boot_id"))
+            return
         pending = self.pending.pop(context, None)
         if pending:
-            pending[1](result)
+            try:
+                pending[1](result)
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                self.problem(f"Некорректный ответ {op}: {exc}")
+            self.flush_cleanup()
             self.changed.emit()
 
     def failed(self, op, reason, context):
         pending = self.pending.pop(context, None)
         if pending:
             (pending[2] or self.problem)(reason)
+            self.flush_cleanup()
             self.changed.emit()
 
     def barrier(self):
-        # Transport.interrupt retires queued requests. Reconcile rather than replay.
-        if self.busy("create"):
-            self.create_unknown = True
         self.pending.clear()
-        for p in self.players.values():
-            if p.phase in ("inspecting", "preparing", "joining", "detaching"):
-                p.close("Запрос прерван. Проверьте статус и отключите приёмник перед повтором.")
+        for name, p in self.players.items():
+            if p.phase in TRANSITIONAL:
+                p.close("Запрос прерван; подписка снимается")
+                self.cleanup.add(name)
+        QTimer.singleShot(0, self.flush_cleanup)
         self.changed.emit()
 
+    def welcome(self, body):
+        self.reset(body.get("boot_id"))
+
+    def reset(self, boot_id):
+        self.boot_id = boot_id
+        self.pending.clear()
+        self.cleanup.clear()
+        self.details, self.names, self.operations, self.capabilities = {}, [], set(), {}
+        for p in self.players.values():
+            p.close("Новая сессия или перезапуск робота")
+        self.changed.emit()
+        if self.watching:
+            self.refresh()
+
     def connection(self):
+        if self._connected == self.session.connected:
+            return
+        self._connected = self.session.connected
         if not self.session.connected:
             self.pending.clear()
-            self.sources, self.streams, self.details = [], [], {}
-            self.last_created = ""
-            self.watching = False
-            self.create_unknown = False
-            self.capabilities = {}
+            self.cleanup.clear()
+            self.details, self.names = {}, []
             for p in self.players.values():
                 p.close("Нет связи")
         self.changed.emit()

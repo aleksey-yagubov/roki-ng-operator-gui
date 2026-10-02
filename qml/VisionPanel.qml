@@ -26,7 +26,7 @@ ScrollView {
             id:previewStream
             objectName:"tuningStream"
             Layout.fillWidth:true
-            model:streams.view.active
+            model:streams.receivers
             textRole:"label"
             currentIndex:model.findIndex(s => s.id === visionTuning.view.previewStream)
             displayText:currentIndex >= 0 ? currentText : "Выберите принимаемый стрим"

@@ -32,16 +32,13 @@ class MediaRobot(FakeRobot):
 
     def _result(self, op, body):
         result = super()._result(op, body)
-        if op == "videostream.start":
-            spec = result["spec"]
-            jpeg = spec["codec"]["name"] == "jpeg"
-            encode = ("jpegenc ! rtpjpegpay pt=26" if jpeg else
-                      "openh264enc bitrate=2000000 gop-size=30 ! h264parse ! rtph264pay pt=96 config-interval=1")
-            launch = ("videotestsrc is-live=true pattern=smpte ! video/x-raw,format=I420,width=800,height=648,framerate=30/1 "
-                      f"! {encode} ssrc=1234 ! udpsink host=127.0.0.1 port={body['rtp_port']} sync=false")
+        if op == "videostream.subscribe":
+            encode = "openh264enc bitrate=2000000 gop-size=30 ! h264parse ! rtph264pay pt=96 config-interval=1"
+            launch = ("videotestsrc is-live=true pattern=smpte ! video/x-raw,format=I420,width=800,height=650,framerate=30/1 "
+                      f"! {encode} ssrc={result['ssrc']} ! udpsink host=127.0.0.1 port={body['rtp_port']} sync=false")
             self.pipeline = self.Gst.parse_launch(launch)
             self.pipeline.set_state(self.Gst.State.PLAYING)
-        elif op in ("videostream.destroy", "videostream.detach") and self.pipeline:
+        elif op in ("videostream.stop", "videostream.unsubscribe") and self.pipeline:
             self.pipeline.set_state(self.Gst.State.NULL)
             self.pipeline = None
         return result
@@ -86,7 +83,7 @@ def main():
                 wait_until(lambda: controller.control.view["manual"] and not controller.control.pending)
                 manager = controller.streams
                 manager.refresh()
-                wait_until(lambda: len(manager.sources)==3 and bool(manager.capabilities))
+                wait_until(lambda: len(manager.names)==3 and bool(manager.capabilities) and not manager.pending)
                 first = controller.video_views.add("")
                 second = controller.video_views.add("")
                 image_dock = window.findChild(QObject, "viewDock-" + first)
@@ -94,32 +91,30 @@ def main():
                 other = window.findChild(QObject, "viewImage-" + second)
                 assert item and other and image_dock
                 QMetaObject.invokeMethod(image_dock,"setAsCurrentTab")
-                choices = (("jpeg", "jpegdec"), ("h264", "avdec_h264"))
-                if sys.platform != "darwin": choices = (("h264", "vah264dec"), ("jpeg", "vajpegdec")) + choices
+                choices = (("h264", "avdec_h264"),)
+                if sys.platform == "linux": choices = (("h264", "vah264dec"),) + choices
                 for codec, decoder in choices:
                     QMetaObject.invokeMethod(image_dock, "open")
                     QMetaObject.invokeMethod(image_dock, "setAsCurrentTab")
-                    previous = manager.last_created
-                    manager.create(dict(source="direct-gst",sensorWidth=1600,sensorHeight=1300,depth=10,
-                                        width=800,height=648,fps=30,codec=codec,bitrate=2000000))
-                    wait_until(lambda: manager.last_created != previous and not manager.busy(manager.last_created))
-                    ident = manager.last_created
-                    manager.connectStream(ident,video_port,decoder,True)
+                    ident = "stream"
+                    controller.video_views.select(first,ident)
+                    controller.video_views.select(second,ident)
+                    manager.watch(ident,0,decoder)
                     wait_until(lambda: ident in manager.players)
                     video = manager.players[ident]
                     controller.video_views.select(first,ident)
                     controller.video_views.select(second,ident)
                     wait_until(lambda: video.view["frames"] >= 30 or bool(video.error), 15000)
                     assert not video.error, video.error
-                    assert video.view["size"] == "800x648", video.view
+                    assert video.view["size"] == "800x650", video.view
                     wait_until(lambda: video.view["fps"] is not None and 25 < video.view["fps"] < 35, 5000)
                     assert not warnings, warnings
                     assert item.window() == window
-                    stream_id = video.info["stream_id"]
+                    run_id = video.info["run_id"]
                     before = video.image_serial
                     image_dock.setProperty("isFloating", True)
                     wait_until(lambda: item.window() != window and video.image_serial > before + 5)
-                    assert video.info["stream_id"] == stream_id
+                    assert video.info["run_id"] == run_id
                     assert item.window().grabWindow().save(str(output / f"{len(report['cycles'])}-floating.png"))
                     before = video.image_serial
                     image_dock.setProperty("isFloating", False)
@@ -129,7 +124,7 @@ def main():
                     wait_until(lambda: video.image_serial > before + 5)
                     QMetaObject.invokeMethod(image_dock, "open")
                     QMetaObject.invokeMethod(image_dock, "setAsCurrentTab")
-                    assert video.info["stream_id"] == stream_id
+                    assert video.info["run_id"] == run_id
                     frame = item.window().grabWindow()
                     assert frame.save(str(output / f"{len(report['cycles'])}-{codec}.png"))
                     report["cycles"].append(dict(codec=codec, decoder=decoder, fps=video.view["fps"], frames=video.view["frames"], size=video.view["size"]))
@@ -137,10 +132,10 @@ def main():
                     QMetaObject.invokeMethod(image_dock, 'forceClose')
                     before = video.image_serial
                     wait_until(lambda: video.image_serial > before + 5)
-                    assert video.info["stream_id"] == stream_id
+                    assert video.info["run_id"] == run_id
                     assert other.property("source") == item.property("source")
                     assert len([p for p in manager.players.values() if p.phase == "receiving"]) == 1
-                    manager.detach(ident)
+                    manager.unsubscribe(ident)
                     wait_until(lambda: video.phase=="stopped" and not manager.busy(ident), 5000)
                     wait_until(lambda: not str(item.property("source").toString()))
                     assert not image_dock.property("isOpen")

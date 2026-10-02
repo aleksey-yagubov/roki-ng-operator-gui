@@ -10,26 +10,25 @@ from PySide6.QtGui import QImage
 
 def receiver_description(info, decoder, latency):
     codec = info["encoding_name"]
-    choices = {"H264": ("vah264dec", "avdec_h264"), "JPEG": ("vajpegdec", "jpegdec")}
+    choices = {"H264": ("vah264dec", "avdec_h264")}
     if codec not in choices or decoder not in choices[codec]:
         raise ValueError("Декодер не соответствует кодеку")
     pt = int(info["payload_type"])
     ssrc = info.get("ssrc")
     if ssrc is not None: ssrc = int(ssrc)
-    if not 0 <= pt <= 127 or (ssrc is not None and not 0 <= ssrc < 2**32) or not 0 <= latency <= 1000:
+    if pt != 96 or info.get("clock_rate") != 90000 or (ssrc is not None and not 0 <= ssrc < 2**32) or not 0 <= latency <= 1000:
         raise ValueError("Некорректные параметры RTP")
     ssrc_caps = f",ssrc=(uint){ssrc}" if ssrc is not None else ""
-    depay, parse = ("rtph264depay", "h264parse") if codec == "H264" else ("rtpjpegdepay", "jpegparse")
     tail = ("videoconvert ! video/x-raw,format=RGBA ! appsink name=frames "
             "sync=false max-buffers=1 drop=true emit-signals=true")
     return (f'udpsrc name=network close-socket=false caps="application/x-rtp,media=video,'
             f'encoding-name={codec},payload=(int){pt},clock-rate=(int)90000{ssrc_caps}" '
             f'! rtpjitterbuffer latency={latency} drop-on-latency=true '
-            f'! {depay} ! {parse} ! {decoder} name=decoder ! {tail}')
+            f'! rtph264depay ! h264parse ! {decoder} name=decoder ! {tail}')
 
 
 class MediaWorker(QObject):
-    ready = Signal()
+    ready = Signal(int)
     stopped = Signal()
     error = Signal(str)
     status = Signal(object)
@@ -117,7 +116,7 @@ class MediaWorker(QObject):
             self.timer.setInterval(100)
             self.timer.timeout.connect(self.poll)
             self.timer.start()
-            self.ready.emit()
+            self.ready.emit(self.socket.get_local_address().get_port())
         except Exception as exc:
             self.error.emit(str(exc))
             self.stop()
@@ -172,7 +171,7 @@ class MediaWorker(QObject):
 
 
 class Receiver(QObject):
-    ready = Signal()
+    ready = Signal(int)
     stopped = Signal()
     error = Signal(str)
     status = Signal(object)

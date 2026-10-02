@@ -8,6 +8,7 @@ class VideoViews(QObject):
     changed = Signal()
     added = Signal(str)
     removed = Signal(str)
+    requested = Signal(str)
 
     def __init__(self, path, parent=None):
         super().__init__(parent)
@@ -35,6 +36,14 @@ class VideoViews(QObject):
         self.changed.emit()
         self.added.emit(ident)
         return ident
+
+    @Slot(str)
+    def show(self, stream):
+        existing = next((e for e in self.items if e["stream"] == stream), None)
+        if existing:
+            self.requested.emit(existing["id"])
+        else:
+            self.add(stream)
 
     @Slot(str)
     def remove(self, ident):

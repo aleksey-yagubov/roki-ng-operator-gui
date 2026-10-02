@@ -15,8 +15,7 @@ app = QCoreApplication([])
 Gst.init(None)
 print('PyGObject', gi.__version__, Gst.version_string(), flush=True)
 for codec, decoder, encoder, payloader in (
-    ('H264', 'avdec_h264', 'x264enc tune=zerolatency speed-preset=ultrafast', 'rtph264pay config-interval=1'),
-    ('JPEG', 'jpegdec', 'jpegenc', 'rtpjpegpay'),
+    ('H264', 'avdec_h264', 'openh264enc bitrate=2000000 gop-size=15 ! h264parse', 'rtph264pay config-interval=1'),
 ):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(('127.0.0.1', 0))
@@ -27,7 +26,7 @@ for codec, decoder, encoder, payloader in (
     sender = None
     try:
         worker.start(dict(decoder=decoder, latency=30,
-            info=dict(encoding_name=codec, payload_type=96, ssrc=1234,
+            info=dict(encoding_name=codec, payload_type=96, clock_rate=90000, ssrc=1234,
                       rtp_port=port)))
         if errors:
             raise RuntimeError(errors)

@@ -1,6 +1,9 @@
 # Согласование с роботной частью
 
-Источник wire-протокола: `roki-ng/docs/OPERATOR_PROTOCOL_V1.md`.
+Источник wire-протокола: `roki-ng/docs/OPERATOR_PROTOCOL.md`.
+GUI и runtime обновляются вместе: UDP-конверт без `v`, hello без `versions`.
+Видеовыходы именованные, только H.264; описание актуальной реализации в
+[CAMERA_STREAMS_VIEWS.md](CAMERA_STREAMS_VIEWS.md).
 Архитектурные планы не означают реализованную функциональность. Перед расширением
 читаем также `GUI_AGENT_HANDOFF.md`, `DISPLAY_PROTOCOL.md`,
 `COLLABORATION_HANDOFF.md` и `CALIBRATION_AND_RECOVERY.md` в `roki-ng/docs/`.

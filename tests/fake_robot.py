@@ -2,10 +2,28 @@
 
 import socket
 import threading
+from copy import deepcopy
 
 import msgpack
 
 from operator_gui.transport import envelope
+
+
+def video_output(name):
+    settings = dict(width=800, height=650, fps=60., bitrate=2000000)
+    controls = dict(width=dict(type="int", fixed=True), height=dict(type="int", fixed=True),
+                    fps=dict(type="float", min=1, max=120), bitrate=dict(type="int", min=100000, max=20000000))
+    if name == "stream":
+        settings.update(sensor_width=1600, sensor_height=1300, sensor_depth=10)
+        controls.update(width=dict(type="int", min=16, max=1600), height=dict(type="int", min=16, max=1300),
+                        sensor_width=dict(type="int", min=16, max=1600), sensor_height=dict(type="int", min=16, max=1300),
+                        sensor_depth=dict(type="int", choices=[8, 10]))
+    else:
+        settings["max_fps"] = 15.
+        controls["max_fps"] = dict(type="float", min=1, max=120, live=True)
+    return dict(name=name, title=name, state="stopped", available=True, reason="", settings=settings,
+                controls=controls, subscribed=False, receivers=0, producer=dict(requested=False, publishing=False),
+                run_id=None, ssrc=None, encoding_name="H264", payload_type=96, clock_rate=90000, mtu=1400)
 
 
 class FakeRobot:
@@ -37,7 +55,8 @@ class FakeRobot:
         self.subscriptions = {}
         self.power_sample = dict(valid=True, age_ms=5, data=dict(
             voltage_v=12.04, adc_raw=3253, valid=True, simulated=True, error=None))
-        self.streams = {}
+        self.streams = {n: video_output(n) for n in ("stream", "camera", "localisation")}
+        self.video_run = 0
         self.camera_running = False
         self.camera_exposure = 8000
         self.localisation_enabled = False
@@ -93,6 +112,7 @@ class FakeRobot:
                 continue
             try:
                 message = msgpack.unpackb(raw, raw=False)
+                assert "v" not in message
                 self.requests.append(message)
                 if self.silent:
                     continue
@@ -102,9 +122,10 @@ class FakeRobot:
                     assert op == "motion.drive" and message["body"]["lease_epoch"] == self.lease
                     continue
                 if op == "hello":
+                    assert "versions" not in message["body"]
                     body = dict(robot_id="LOCAL-TEST", boot_id="fake-boot", heartbeat_ms=500,
                                 session_timeout_ms=2000, drive_timeout_ms=350, state="GAME",
-                                capabilities_revision="manual-1", max_datagram=1400)
+                                max_datagram=1400)
                     self._send(envelope("welcome", "hello", body, ident, self.session, self.token), address)
                     continue
                 assert message["session"] == self.session and message["token"] == self.token
@@ -130,7 +151,7 @@ class FakeRobot:
             return dict(state=self.mode, owner=self.owner, boot_id="fake-boot", counters={},
                         workers={"motherboard": {"alive": True, "state": "ready"}})
         if op == "system.capabilities":
-            return dict(revision="manual-1", simulated=True, future=["video", "osd"],
+            return dict(simulated=True, future=["video", "osd"],
                         **({"localisation":{"mode":"diagnostic_only"}} if self.localisation_enabled else {}))
         if op in ("game.start", "game.stop", "game.status"):
             if op != "game.status":
@@ -183,54 +204,59 @@ class FakeRobot:
             return dict(running=self.camera_running,sequence=12,frame_duration_us=16667,
                         requested_controls=dict(exposure_us=self.camera_exposure),
                         imu_sync=dict(state="synced" if self.camera_running else "idle"),error=None)
-        if op == "videostream.sources":
-            available={"direct-gst":not self.camera_running,"runtime":self.camera_running,"localisation":self.localisation_running}
-            items=[dict(id=k,name=k,available=available[k],reason="" if available[k] else "producer_unavailable", stream_settings=dict(codecs=["jpeg","h264"],max_fps=[1,120],max_size=[1600,1300] if k=="direct-gst" else [800,650],jpeg_alignment=8)) for k in available]
-            start=body.get("offset",0);limit=body.get("limit",1)
-            return dict(items=items[start:start+limit],next_offset=start+limit if start+limit<len(items) else None)
-        if op == "videostream.list":
-            items=[dict(stream_id=k,source=v["spec"]["source"],state=v["state"],run_id=v["run_id"],receivers=v["receivers"],attached=v["attached"]) for k,v in self.streams.items()]
-            start=body.get("offset",0);limit=body.get("limit",4)
-            return dict(items=items[start:start+limit],next_offset=start+limit if start+limit<len(items) else None)
-        if op == "videostream.capabilities":
-            return dict(backends=["direct-gst"], codecs=["h264", "jpeg"])
-        if op == "videostream.create":
-            assert self.owner == self.session and self.mode == "MANUAL"
-            assert "destination" not in body and "backend" not in body
-            ident = str(len(self.streams) + 1)
-            jpeg = body["codec"]["name"] == "jpeg"
-            self.streams[ident] = dict(stream_id=ident, spec=body, state="created", ssrc=None, run_id=None, attached=False, receivers=0,
-                                      payload_type=26 if jpeg else 96, clock_rate=90000,
-                                      encoding_name="JPEG" if jpeg else "H264")
-            return self.streams[ident].copy()
-        if op in ("videostream.start", "videostream.attach"):
-            if op == "videostream.attach":
-                assert self.streams[body["stream_id"]]["state"] in ("starting", "running")
-            else:
+        if op == "system.operations":
+            items = ["system.status"] + ["videostream." + suffix for suffix in
+                    ("capabilities", "list", "status", "subscribe", "unsubscribe", "update", "stop")]
+            start, limit = body.get("offset", 0), body.get("limit", 12)
+            return dict(items=items[start:start+limit], next_offset=start+limit if start+limit<len(items) else None)
+        if op.startswith("videostream."):
+            available = dict(stream=not self.camera_running, camera=self.camera_running,
+                             localisation=self.localisation_running)
+            for name, item in self.streams.items():
+                item["available"] = available.get(name, True)
+                item["reason"] = "" if item["available"] else "producer_unavailable"
+            if op == "videostream.list":
+                assert body["limit"] == 1
+                start = body["offset"]
+                items = list(self.streams.values())
+                return deepcopy(dict(items=items[start:start+1], total=len(items),
+                                     next_offset=start+1 if start+1<len(items) else None))
+            if op == "videostream.capabilities":
+                return dict(codec="h264", mtu=1400, max_receivers=4, exact_osd=False, rtcp=False)
+            item = self.streams[body["name"]]
+            if op == "videostream.subscribe":
+                assert "settings" not in body
+                if item["state"] not in ("starting", "running"):
+                    assert self.owner == self.session and body["lease_epoch"] == self.lease and item["available"]
+                    self.video_run += 1
+                    item.update(state="running", run_id=str(self.video_run), ssrc=1234+self.video_run)
+                if not item["subscribed"]:
+                    item["receivers"] += 1
+                item.update(subscribed=True, destination=["127.0.0.1",body["rtp_port"]])
+                item["producer"] = dict(requested=True, publishing=True)
+            elif op == "videostream.unsubscribe":
+                if item["subscribed"]:
+                    item["receivers"] -= 1
+                item["subscribed"] = False
+                if not item["receivers"]:
+                    item.update(state="stopped", producer=dict(requested=False, publishing=False))
+            elif op == "videostream.stop":
                 assert body["lease_epoch"] == self.lease
-            self.streams[body["stream_id"]].update(state="running", ssrc=1234, run_id="run1", attached=True, receivers=1, destination=["127.0.0.1",body["rtp_port"]])
-            return self.streams[body["stream_id"]].copy()
-        if op == "videostream.detach":
-            stream=self.streams[body["stream_id"]]
-            stream.update(state="stopped", attached=False, receivers=0)
-            return stream.copy()
-        if op == "videostream.stop":
-            self.streams[body["stream_id"]].update(state="stopped",attached=False,receivers=0)
-            return self.streams[body["stream_id"]].copy()
-        if op == "videostream.update":
-            item=self.streams[body["stream_id"]]
-            if "max_fps" in body:item["spec"]["max_fps"]=body["max_fps"]
-            if "bitrate" in body:item["spec"]["codec"]["bitrate"]=body["bitrate"]
-            return item.copy()
-        if op == "videostream.status":
-            return self.streams[body["stream_id"]].copy()
-        if op == "videostream.destroy":
-            self.streams.pop(body["stream_id"], None)
-            return dict(stream_id=body["stream_id"], state="destroyed")
+                item.update(state="stopped", subscribed=False, receivers=0, producer=dict(requested=False, publishing=False))
+            elif op == "videostream.update":
+                assert body["lease_epoch"] == self.lease
+                for key, value in body["settings"].items():
+                    meta = item["controls"][key]
+                    assert not meta.get("fixed")
+                    assert item["state"] in ("stopped", "failed") or meta.get("live")
+                    item["settings"][key] = value
+            else:
+                assert op == "videostream.status", op
+            return deepcopy({k:v for k,v in item.items() if k not in ("controls", "title", "destination")})
         if op == "data.list":
-            return {"items": [dict(name=t, kind="state", max_rate_hz=10, schema=1)
+            return {"items": [dict(name=t, kind="state", max_rate_hz=10)
                               for t in ("system.workers", "motion.state", "camera.state", "detection.state")]
-                    + [dict(name="body.power", kind="state", max_rate_hz=1, schema=1)]}
+                    + [dict(name="body.power", kind="state", max_rate_hz=1)]}
         if op == "data.snapshot":
             return self.sample(body["topic"])
         if op == "data.subscribe":

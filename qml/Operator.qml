@@ -68,6 +68,7 @@ ApplicationWindow {
     Connections {
         target: videoViews
         function onAdded(ident) { window.addViewer(ident) }
+        function onRequested(ident) { window.showDock(window.viewDocks[ident]) }
         function onRemoved(ident) { window.removeViewer(ident) }
     }
 
@@ -94,10 +95,12 @@ ApplicationWindow {
                         MenuItem { text: "Ручное управление"; onTriggered: showDock(manualDock) }
                         MenuItem { text: "Камера"; onTriggered: showDock(cameraDock) }
                         MenuItem { text: "Стримы"; onTriggered: showDock(videoDock) }
-                        MenuItem { objectName: "newVideoView"; text: "Добавить просмотр видео"; onTriggered: videoViews.add("") }
+                        MenuItem { objectName: "newVideoView"; text: "Открыть новый просмотр видео"; onTriggered: videoViews.add("") }
                         Menu {
                             id: viewsMenu
-                            title: "Открыть просмотр"
+                            objectName: "existingVideoViewsMenu"
+                            title: "Созданные просмотры"
+                            visible: videoViews.entries.length > 0
                             Instantiator {
                                 model: videoViews.entries
                                 delegate: MenuItem {

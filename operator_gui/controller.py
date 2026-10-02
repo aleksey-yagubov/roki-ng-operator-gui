@@ -86,6 +86,7 @@ class Controller(QObject):
         self.streams = Streams(self.transport, self.control, self._log, self)
         self.camera = Camera(self.transport, self.control, self)
         self.video_views = VideoViews(config_dir / "video-views.json", self)
+        self.streams.openView.connect(self.video_views.show)
         self.vision_tuning = VisionTuning(self.transport, self.control, self.streams, self)
 
     @Property("QVariantMap", notify=changed)
