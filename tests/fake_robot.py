@@ -113,6 +113,10 @@ class FakeRobot:
                 raw, address = self.sock.recvfrom(1401)
             except socket.timeout:
                 continue
+            except ConnectionResetError:
+                # Windows отдаёт ICMP port unreachable через recvfrom после
+                # отправки на уже закрытый порт прежнего клиента.
+                continue
             try:
                 message = msgpack.unpackb(raw, raw=False)
                 assert "v" not in message
