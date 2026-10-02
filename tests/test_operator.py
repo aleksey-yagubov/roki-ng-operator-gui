@@ -94,6 +94,24 @@ class OperatorTests(unittest.TestCase):
         wait_until(lambda: "value" in self.controller.param_parts and "description" in self.controller.param_parts)
         self.assertEqual(self.controller.param_parts["value"], -1500)
 
+    def test_rtt_and_video_responses_do_not_invalidate_unrelated_panels(self):
+        self.connect()
+        c = self.controller
+        wait_until(lambda: c.control.mode == c.mode)
+        changes = []
+        c.changed.connect(lambda: changes.append("controller"))
+        c.control.changed.connect(lambda: changes.append("control"))
+        c.camera.changed.connect(lambda: changes.append("camera"))
+        session = c.transport
+        state = dict(phase=session.phase, invalid_packets=session.invalid_packets,
+                     session=session.session, rtt_ms=1.)
+        for i in range(100):
+            session._state(dict(state, rtt_ms=float(i)))
+            session.response.emit("videostream.list", {"items": []}, "streams:unused")
+            session.response.emit("session.heartbeat", {"state": c.control.mode}, "")
+        self.assertEqual(changes, [])
+        self.assertEqual(session.rtt_ms, 99.)
+
     def test_logs_pause_filter_gap_and_bounds(self):
         self.connect()
         self.robot.send_log("first")

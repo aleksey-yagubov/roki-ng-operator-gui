@@ -93,6 +93,7 @@ class MediaWorker(QObject):
             gi.require_version("Gst", "1.0")
             gi.require_version("GstVideo", "1.0")
             from gi.repository import Gst, Gio, GstVideo
+            Gst.init(None)
             self.Gst = Gst
             self.GstVideo = GstVideo
             self.copied = 0
@@ -186,12 +187,6 @@ class Receiver(QObject):
         self.Gst = None
 
     def prepare(self):
-        if self.Gst is None:
-            import gi
-            gi.require_version("Gst", "1.0")
-            from gi.repository import Gst
-            Gst.init(None)
-            self.Gst = Gst
         if self.thread is None:
             self.thread = QThread(self)
             self.thread.setObjectName("operator-video")

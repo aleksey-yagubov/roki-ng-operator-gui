@@ -51,6 +51,7 @@ class Control(QObject):
     def __init__(self, session, log, parent=None):
         super().__init__(parent)
         self.session, self.log = session, log
+        self._connected = session.connected
         self.lease = None
         self.mode = ""
         self.pending = ""
@@ -351,7 +352,7 @@ class Control(QObject):
             self.zero_remaining = 3
             self.drive_timer.start()
             self._drive()
-        self.changed.emit()
+            self.changed.emit()
 
     def _drive(self):
         if not self.owns or self.mode != "MANUAL" or not (self.held or self.zero_remaining):
@@ -413,6 +414,9 @@ class Control(QObject):
 
     @Slot()
     def _connection(self):
+        if self._connected == self.session.connected:
+            return
+        self._connected = self.session.connected
         if not self.session.connected:
             self._invalidate_head()
             self.lease = None
@@ -441,6 +445,14 @@ class Control(QObject):
             elif result.get("valid") is not True or not isinstance(age, (int, float)) or not 0 <= age <= 1500:
                 self.head_target = None
                 self.headChanged.emit()
+            return
+        relevant = op in ("control.acquire", "control.release", "session.heartbeat", "mode.set",
+                          "system.status", "game.start", "game.stop", "game.status", "motion.head",
+                          "job.status", "motion.stop_hard")
+        if not relevant and op != self.pending and not (result.get("job_id") and result.get("accepted")):
+            return
+        if (op == "session.heartbeat" and result.get("state", self.mode) == self.mode
+                and (self.mode == "MANUAL" or not self.held)):
             return
         was_moving = self.moving
         was_manual = self.view["manual"]

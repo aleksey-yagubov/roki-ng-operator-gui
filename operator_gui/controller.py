@@ -34,6 +34,7 @@ class Controller(QObject):
         self.config_dir = config_dir
         self.host, self.port = host, port
         self.transport = Session(self)
+        self._transport_phase = self.transport.phase
         self.transport.changed.connect(self._transport_changed)
         self.transport.welcomed.connect(self._welcome)
         self.transport.response.connect(self._response)
@@ -142,6 +143,10 @@ class Controller(QObject):
 
     @Slot()
     def _transport_changed(self):
+        # RTT and counters refresh on the UI clock, not on every RPC response.
+        if self.transport.phase == self._transport_phase:
+            return
+        self._transport_phase = self.transport.phase
         if not self.transport.connected:
             self.pages.clear()
             if hasattr(self, "video_views"):
@@ -244,7 +249,10 @@ class Controller(QObject):
     def _response(self, op, result, context):
         try:
             if op in ("session.heartbeat", "mode.set"):
-                self.mode = str(result.get("state", self.mode))
+                mode = str(result.get("state", self.mode))
+                if mode == self.mode:
+                    return
+                self.mode = mode
             elif op in ("game.start", "game.status") and result.get("running") is True:
                 self.mode = "GAME"
             elif op == "system.status":
@@ -291,6 +299,8 @@ class Controller(QObject):
                     self._log("INFO", f"Сохранён {context}: {result.get('value')}; применение: {result.get('apply')}")
             elif op == "log.subscribe":
                 self._log("INFO", "Журнал робота подключён. Фильтры в панели работают локально.")
+            else:
+                return
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             self._failed(op, f"Invalid response: {exc}", context)
         self.changed.emit()

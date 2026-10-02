@@ -356,11 +356,14 @@ class Session(QObject):
 
     @Slot(object)
     def _state(self, state):
+        previous = (self.phase, self.invalid_packets, self.session)
         self.phase = state["phase"]
         self.rtt_ms = state["rtt_ms"]
         self.invalid_packets = state["invalid_packets"]
         self.session = state["session"]
-        self.changed.emit()
+        # Per-response RTT is read by the UI clock. It is not a connection change.
+        if (self.phase, self.invalid_packets, self.session) != previous:
+            self.changed.emit()
 
     @property
     def connected(self):
