@@ -27,4 +27,6 @@ if not exist "%W%\gtk\lib\site-packages\gi" (
 ) else (
   echo == gvsbuild GTK already extracted
 )
+
+"%LOCALAPPDATA%\Python\bin\python.exe" "%~dp0install_gi_bootstrap.py" || exit /b 1
 echo VIDEO_WINDOWS_OK
