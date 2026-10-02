@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 READY = False
+_DLL_DIR_COOKIES = []
 
 _ROOT = Path(__file__).resolve().parents[1] / ".deps" / "windows"
 
@@ -61,7 +62,9 @@ def prepare():
     gtk_bin = str(gtk / "bin")
     gst_bin = str(gst_root / "bin")
     for dll_dir in (gtk_bin, gst_bin):
-        os.add_dll_directory(dll_dir)
+        # Keep the cookie: without it, GC removes the directory from the
+        # DLL search path and libgstreamer stops resolving.
+        _DLL_DIR_COOKIES.append(os.add_dll_directory(dll_dir))
     # gvsbuild GLib must be the shared instance for both stacks.
     ctypes.CDLL(str(gtk / "bin" / "glib-2.0-0.dll"))
     ctypes.CDLL(str(gtk / "bin" / "girepository-2.0-0.dll"))
