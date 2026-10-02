@@ -7,16 +7,16 @@ ScrollView {
     clip: true
     contentWidth: availableWidth
     property var kddockwidgets_min_size: Qt.size(580, 320)
-    onVisibleChanged: localisation.watch(visible)
     ColumnLayout {
     width: root.availableWidth
     Flow {
         Layout.fillWidth: true; spacing: 6
         Button { objectName: "localisationCheck"; text: localisation.view.checking ? "Проверяю…" : "Проверить возможности"; enabled: backend.view.connected && !localisation.view.checking; onClicked: localisation.check() }
         Button { objectName: "localisationRefresh"; text: "Обновить"; enabled: localisation.view.available && !localisation.view.pending; onClicked: localisation.refresh() }
-        CheckBox { text: "Обновлять 2 раза/с"; enabled: localisation.view.available; checked: localisation.view.watching; onToggled: localisation.watch(checked) }
+        Button { objectName: "localisationSubscribe"; text: localisation.view.watching ? "Отключить данные позиции" : "Получать данные позиции"; enabled: backend.view.connected && !localisation.view.subscriptionPending; onClicked: localisation.watch(!localisation.view.watching) }
     }
-    Label { objectName: "localisationNotice"; text: localisation.view.notice; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { text: "localisation.state: общая подписка с игрой и «Источниками данных». Получение данных не запускает локализацию или камеру."; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    SelectableLabel { objectName: "localisationNotice"; text: localisation.view.notice; wrapMode: Text.Wrap; Layout.fillWidth: true }
     RowLayout {
         Label { text: "Старт X, м" }
         TextField { id: priorX; objectName: "localisationPriorX"; text: "0"; Layout.preferredWidth: 65; selectByMouse: true }
@@ -29,15 +29,31 @@ ScrollView {
         Button {
             objectName: "localisationStart"
             text: "Запустить с этой позой"
-            enabled: localisation.view.available && !localisation.view.running && controls.view.manual && !controls.view.pending
+            enabled: localisation.view.available && !localisation.view.running && controls.view.owns && (controls.view.manual || controls.view.mode === "GAME") && !controls.view.pending
             onClicked: localisation.start(Number(priorX.text.replace(",", ".")), Number(priorY.text.replace(",", ".")), Number(priorYaw.text.replace(",", ".")))
         }
         Button { objectName: "localisationStop"; text: "Остановить локализацию"; enabled: localisation.view.available && controls.view.owns && !controls.view.pending; onClicked: localisation.stop() }
     }
-    Label { objectName: "localisationStatus"; text: localisation.view.status; font.bold: true; Layout.fillWidth: true; wrapMode: Text.Wrap }
-    Label { text: localisation.view.error; visible: text.length > 0; color: "#b03030"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    SelectableLabel { objectName: "localisationStatus"; text: localisation.view.status; font.bold: true; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    SelectableLabel { text: localisation.view.error; visible: text.length > 0; color: "#b03030"; Layout.fillWidth: true; wrapMode: Text.Wrap }
     Label { text:"Захват с IMU запускается в «Камере». Для обработанного видео выберите источник localisation в «Стримах», затем добавьте просмотр."; wrapMode:Text.Wrap; Layout.fillWidth:true }
     Label { objectName:"localisationProblems"; text:localisation.view.problems; visible:text.length>0; wrapMode:Text.Wrap; Layout.fillWidth:true }
+    SelectableLabel {
+        objectName: "localisationResultSummary"
+        text: localisation.view.resultSummary + (localisation.view.reason ? "\nПричина: " + localisation.view.reason : "")
+        Layout.fillWidth: true; wrapMode: Text.Wrap
+    }
+    Flow {
+        Layout.fillWidth: true; spacing: 6
+        CheckBox { id: showLast; objectName: "localisationShowLast"; text: "Последняя пригодная оценка"; checked: true; onToggled: map.requestPaint() }
+        CheckBox { id: showQuestionable; objectName: "localisationShowQuestionable"; text: "Сомнительные кандидаты"; onToggled: map.requestPaint() }
+    }
+    Label {
+        objectName: "localisationLastPoseAge"
+        visible: showLast.checked && localisation.view.pose.length === 0 && localisation.view.lastPose.length === 3
+        text: "Серая отметка: последняя пригодная оценка, возраст " + ((localisation.view.lastPoseAgeMs ?? 0) / 1000).toFixed(1) + " с. Это не текущая позиция."
+        Layout.fillWidth: true; wrapMode: Text.Wrap
+    }
     Canvas {
         id: map
         objectName: "localisationMap"
@@ -59,16 +75,20 @@ ScrollView {
             c.strokeRect(px(g.width/2),py(g.length/2),g.width*ppm,g.length*ppm)
             c.beginPath(); c.moveTo(px(g.width/2),py(0)); c.lineTo(px(-g.width/2),py(0)); c.stroke()
             c.beginPath(); c.arc(px(0),py(0),g.circle_diameter*ppm/2,0,Math.PI*2); c.stroke()
-            let p=data.pose
-            if(p.length===3) {
-                c.strokeStyle="#ffad42"; c.fillStyle="#ffad42"; c.lineWidth=3
-                c.beginPath(); c.arc(px(p[1]),py(p[0]),7,0,Math.PI*2); c.fill()
+            function drawPose(p, colour, hollow) {
+                if (p.length !== 3) return
+                c.strokeStyle=colour; c.fillStyle=colour; c.lineWidth=3
+                c.beginPath(); c.arc(px(p[1]),py(p[0]),7,0,Math.PI*2)
+                if (hollow) c.stroke(); else c.fill()
                 c.beginPath(); c.moveTo(px(p[1]),py(p[0])); c.lineTo(px(p[1]+.25*Math.sin(p[2])),py(p[0]+.25*Math.cos(p[2]))); c.stroke()
             }
+            if (data.pose.length === 3) drawPose(data.pose, "#ffad42", false)
+            else if (showLast.checked) drawPose(data.lastPose, "#a9adb3", false)
+            if (showQuestionable.checked) drawPose(data.questionablePose, "#ff7070", true)
             c.fillStyle="white"; c.fillText("+X ↑   +Y ←   "+g.length+" × "+g.width+" м",8,18)
-            c.fillText("Оранжевый: диагностический кандидат",8,height-8)
         }
     }
+    Label { text: "Оранжевый: текущий диагностический кандидат. Серый: последняя пригодная оценка. Красный контур: сомнительный кандидат, не принятая позиция. Если координаты не присланы, отметки нет."; Layout.fillWidth: true; wrapMode: Text.Wrap }
     Label {
         Layout.fillWidth: true; wrapMode: Text.Wrap
         text: {
@@ -82,6 +102,6 @@ ScrollView {
                 "\nКарта запуска: "+(v.configurationId || "—")+". Изменения редактора требуют перезапуска локализации."
         }
     }
-    Label { text: "Свои ворота выберите по цвету в «Поле и ворота». Пара цветных стоек помогает определить сторону; при неоднозначности позиция скрыта. После перестановки робота перезапустите локализацию с новой позой. Размер круга и высота камеры требуют проверки."; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    Label { text: "Свои ворота выберите по цвету в «Поле и ворота». Пара цветных стоек помогает определить сторону. При неоднозначности новую позицию не принимаем; её кандидат доступен только как диагностика. После перестановки робота перезапустите локализацию с новой позой. Размер круга и высота камеры требуют проверки."; Layout.fillWidth: true; wrapMode: Text.Wrap }
 }
 }

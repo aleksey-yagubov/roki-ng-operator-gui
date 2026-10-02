@@ -41,7 +41,7 @@ ScrollView {
             enabled: backend.view.connected && !streams.view.catalogBusy
             onClicked: streams.refresh()
         }
-        Label { text: streams.view.error; visible: text.length > 0; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        SelectableLabel { text: streams.view.error; visible: text.length > 0; Layout.fillWidth: true; wrapMode: Text.Wrap }
         ComboBox {
             objectName: "videoTransmissionList"
             model: streams.outputs; textRole: "label"; Layout.fillWidth: true
@@ -75,7 +75,7 @@ ScrollView {
                 onClicked: videoViews.add(root.selected)
             }
         }
-        Label {
+        SelectableLabel {
             text: root.reception.error || ("Приём: " + root.reception.phase + " · "
                 + (root.reception.fps ?? "—") + " FPS · порт " + (root.reception.port || "—"))
             Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -85,7 +85,7 @@ ScrollView {
                 + " · производитель: " + (root.detail.producer?.publishing ? "публикует" : root.detail.producer?.requested ? "запрошен" : "не запрошен")
             Layout.fillWidth: true; wrapMode: Text.Wrap
         }
-        Label { text: root.detail.error || ""; visible: text.length > 0; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        SelectableLabel { text: root.detail.error || ""; visible: text.length > 0; Layout.fillWidth: true; wrapMode: Text.Wrap }
         GroupBox {
             title: "Общие настройки видеовыхода"
             visible: !!root.selected

@@ -245,7 +245,7 @@ ApplicationWindow {
             objectName: "gameDock"
             uniqueName: "game"
             title: "Вратарь FIRA"
-            GamePanel { anchors.fill: parent; anchors.margins: 8 }
+            GamePanel { anchors.fill: parent; anchors.margins: 8; onRequestStreams: window.showDock(videoDock) }
         }
         KDDW.DockWidget {
             id: fieldDock

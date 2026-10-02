@@ -30,6 +30,7 @@ def fields(value):
 class DataSources(QObject):
     changed = Signal()
     topicsChanged = Signal()
+    sampleReceived = Signal(str, object)
 
     def __init__(self, session, parent=None):
         super().__init__(parent)
@@ -144,20 +145,29 @@ class DataSources(QObject):
 
     @Slot(float)
     def subscribe(self, rate):
-        if not self.session.connected or not self.selected or self.view["busy"]:
+        self.subscribe_topic(self.selected, rate)
+
+    def subscribe_topic(self, topic, rate):
+        if not self.session.connected or not topic or any(t == topic for _, t in self.pending):
             return
-        if not math.isfinite(rate) or not 0.2 <= rate <= self.view["maxRate"]:
+        meta = next((m for m in self.topics if m["name"] == topic), {})
+        if not math.isfinite(rate) or not 0.2 <= rate <= meta.get("max_rate_hz", 10):
             self.error = "Частота вне допустимого диапазона"
             self.changed.emit()
             return
-        self.wanted.add(self.selected)
-        self.sequences.pop(self.selected, None)
-        self.request("data.subscribe", {"topic": self.selected, "rate_hz": rate}, self.selected)
+        if topic in self.wanted and self.active.get(topic) == rate:
+            return
+        self.wanted.add(topic)
+        self.sequences.pop(topic, None)
+        self.request("data.subscribe", {"topic": topic, "rate_hz": rate}, topic)
 
     @Slot()
     def unsubscribe(self):
-        if self.selected in self.wanted:
-            self.request("data.unsubscribe", {"subscription_id": self.selected}, self.selected)
+        self.unsubscribe_topic(self.selected)
+
+    def unsubscribe_topic(self, topic):
+        if topic in self.wanted and not any(t == topic for _, t in self.pending):
+            self.request("data.unsubscribe", {"subscription_id": topic}, topic)
 
     @Slot(str, object, str)
     def response(self, op, body, topic):
@@ -211,7 +221,7 @@ class DataSources(QObject):
 
     def _sample(self, body):
         topic = body.get("topic")
-        if (topic != "body.power" and topic not in {m["name"] for m in self.topics}) or not isinstance(body.get("data"), dict):
+        if (topic != "body.power" and topic not in self.wanted and topic not in {m["name"] for m in self.topics}) or not isinstance(body.get("data"), dict):
             return
         self.samples[topic] = (dict(body), time.monotonic())
         if topic == "body.power":
@@ -221,6 +231,7 @@ class DataSources(QObject):
                 self.power_expiry.start(max(1, math.ceil(3000 - age)))
         if topic == self.selected:
             self.rows.replace(fields(body["data"]))
+        self.sampleReceived.emit(topic, dict(body))
 
     @Slot(str, str, str)
     def failed(self, op, message, topic):
@@ -228,6 +239,8 @@ class DataSources(QObject):
             return
         if op.startswith("data."):
             self.pending.discard((op, topic))
+            if op == "data.subscribe" and topic not in self.active:
+                self.wanted.discard(topic)
             self.error = f"{op}: {message}"
             if topic == "body.power":
                 self.power_error = self.error

@@ -1,13 +1,16 @@
 import time
 import unittest
+from unittest.mock import patch
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 from operator_gui.localisation import Localisation
+from operator_gui.data_sources import DataSources
 
 
 class Session(QObject):
     response=Signal(str,object,str)
     failed=Signal(str,str,str)
     changed=Signal()
+    welcomed=Signal(object)
     connected=True
     def __init__(self):
         super().__init__();self.requests=[]
@@ -15,6 +18,7 @@ class Session(QObject):
 
 
 class Control:
+    mode='MANUAL'
     error='Нет управления'
     def __init__(self):self.commands=[];self.allow=True
     def command(self,*args,**kw):self.commands.append((args,kw));return self.allow
@@ -25,8 +29,11 @@ class LocalisationTests(unittest.TestCase):
     def setUpClass(cls):cls.app=QCoreApplication.instance() or QCoreApplication([])
     def setUp(self):
         self.session=Session();self.control=Control()
-        self.model=Localisation(self.session,self.control)
-    def tearDown(self):self.model.shutdown()
+        self.sources=DataSources(self.session)
+        self.model=Localisation(self.session,self.control,self.sources)
+    def tearDown(self):
+        self.model.shutdown()
+        self.sources.shutdown()
     def result(self,**kw):
         state=dict(running=True,age_ms=10,result={'valid':False,'candidate':[1.,.2,.4]})
         state.update(kw)
@@ -55,7 +62,7 @@ class LocalisationTests(unittest.TestCase):
         for kw in ({'running':False},{'error':'worker died'},{'result':None},
                    {'result':{'candidate':[float('nan'),0,0]}}):
             self.result(**kw);self.assertEqual(self.model.view['pose'],[])
-    def test_poll_does_not_accumulate_and_barrier_releases(self):
+    def test_status_requests_do_not_accumulate_and_barrier_releases(self):
         self.model.available=True
         self.model.refresh();self.model.refresh()
         self.assertEqual(len(self.session.requests),1)
@@ -101,14 +108,71 @@ class LocalisationTests(unittest.TestCase):
         self.assertIn('панели «Камера»', self.model.view['notice'])
         self.assertFalse(self.control.commands)
 
-    def test_capability_check_starts_bounded_status_updates(self):
+    def test_capability_check_only_requests_one_status(self):
         self.session.response.emit('system.capabilities', {'localisation': {}}, 'localisation:capabilities')
-        self.assertTrue(self.model.view['watching'])
+        self.assertFalse(self.model.view['watching'])
         self.assertTrue(self.model.pending)
         self.model.refresh()
         self.assertEqual(len(self.session.requests), 1)
-        self.model.watch(False)
+        self.assertFalse(hasattr(self.model, 'timer'))
+
+    def subscribe(self):
+        self.model.watch(True)
+        self.session.response.emit('data.subscribe', {'subscription_id':'localisation.state', 'rate_hz':2}, 'localisation.state')
+
+    def test_explicit_shared_datastream_without_catalog_or_control(self):
+        self.model.watch(True)
+        self.model.watch(True)
+        self.assertEqual(self.session.requests, [
+            ('data.subscribe', {'topic':'localisation.state','rate_hz':2}, 'localisation.state')])
+        self.assertTrue(self.model.view['subscriptionPending'])
+        self.session.response.emit('data.subscribe', {'subscription_id':'localisation.state', 'rate_hz':2}, 'localisation.state')
+        self.model.watch(True)
+        self.assertEqual(len(self.session.requests), 1)
+        self.assertTrue(self.model.view['subscribed'])
+        self.assertFalse(self.control.commands)
+        self.sources.unsubscribe_topic('localisation.state')
+        self.session.response.emit('data.unsubscribe', {}, 'localisation.state')
         self.assertFalse(self.model.view['watching'])
+
+    def test_samples_update_pose_and_account_for_heartbeat_age(self):
+        self.subscribe()
+        sample = dict(topic='localisation.state', sequence=1, valid=False, age_ms=500,
+                      data=dict(running=True, age_ms=100, result=dict(candidate=[1.,2.,0.], valid=True)))
+        self.sources.notification(sample)
+        self.assertEqual(self.model.view['pose'], [1.,2.,0.])
+        self.assertFalse(self.model.view['result']['valid'])
+        self.assertGreaterEqual(self.model.view['ageMs'], 600)
+        self.sources.notification(dict(sample, data=dict(running=False)))
+        self.assertEqual(self.model.view['pose'], [1.,2.,0.], 'Old sequence must be ignored')
+        self.sources.notification(dict(sample, sequence=2, age_ms=1500))
+        self.assertFalse(self.model.view['fresh'])
+        self.assertEqual(self.model.view['pose'], [])
+        self.assertEqual(len(self.session.requests), 1, 'Samples must not issue status requests')
+
+    def test_subscription_failure_can_be_retried(self):
+        self.model.watch(True)
+        self.session.failed.emit('data.subscribe', 'not_found', 'localisation.state')
+        self.assertFalse(self.model.view['watching'])
+        self.assertIn('not_found', self.model.view['notice'])
+        self.model.watch(True)
+        self.assertEqual(len(self.session.requests), 2)
+
+    def test_disconnect_does_not_automatically_restore_localisation_subscription(self):
+        self.subscribe()
+        self.session.connected=False
+        self.session.changed.emit()
+        self.assertFalse(self.model.view['watching'])
+        self.session.connected=True
+        self.session.changed.emit()
+        self.assertEqual(len(self.session.requests), 1)
+
+    def test_unknown_age_does_not_show_pose_as_fresh(self):
+        self.subscribe()
+        for age in (None, -1, float('nan'), '10'):
+            self.model.sample('localisation.state', dict(age_ms=age, data=dict(
+                running=True, age_ms=10, result=dict(candidate=[1.,2.,0.]))))
+            self.assertFalse(self.model.view['fresh'])
 
     def test_ambiguous_pose_is_not_reported_as_localised(self):
         self.model.checked=self.model.available=True
@@ -134,3 +198,52 @@ class LocalisationTests(unittest.TestCase):
         for state in ({'ambiguous':True}, {'fit_state':'weak'}, {'fit_state':'rejected','reason':'motion_discontinuity'}):
             self.result(result={'candidate':[1.,1.,3.], **state})
             self.assertEqual(self.model.view['pose'],[])
+
+    def test_old_pose_remains_display_only_when_stale(self):
+        with patch('operator_gui.localisation.time.monotonic', return_value=100.):
+            self.result()
+        with patch('operator_gui.localisation.time.monotonic', return_value=102.):
+            view = self.model.view
+            self.assertEqual(view['pose'], [])
+            self.assertEqual(view['lastPose'], [1., .2, .4])
+            self.assertEqual(view['lastPoseAgeMs'], 2010)
+            self.assertFalse(view['fresh'])
+
+    def test_bad_candidates_never_replace_last_usable_pose(self):
+        self.result()
+        for state in ({'fit_state':'weak'}, {'fit_state':'ambiguous'},
+                      {'fit_state':'rejected', 'reason':'motion_discontinuity'}):
+            self.result(result={'candidate':[5., 4., 3.], **state})
+            self.assertEqual(self.model.view['pose'], [])
+            self.assertEqual(self.model.view['questionablePose'], [5., 4., 3.])
+            self.assertEqual(self.model.view['lastPose'], [1., .2, .4])
+
+    def test_missing_and_nonfinite_coordinates_are_not_drawn(self):
+        for pose in (None, [], [float('inf'), 0, 0]):
+            self.result(result={'candidate':pose, 'fit_state':'rejected'})
+            self.assertEqual(self.model.view['questionablePose'], [])
+
+    def test_insufficient_observations_is_explicit_and_keeps_last_pose(self):
+        self.model.checked = self.model.available = True
+        self.result()
+        self.result(result={'candidate':None, 'reason':'insufficient_observations', 'lines':2})
+        self.assertIn('insufficient_observations', self.model.view['status'])
+        self.assertIn('отрезков 2', self.model.view['resultSummary'])
+        self.assertEqual(self.model.view['lastPose'], [1., .2, .4])
+        self.assertEqual(self.model.view['questionablePose'], [])
+
+    def test_new_capture_or_map_and_disconnect_clear_cached_pose(self):
+        for key in ('capture_id', 'configuration_id', 'geometry'):
+            self.result(**{key:'old'})
+            self.result(result=None, **{key:'new'})
+            self.assertEqual(self.model.view['lastPose'], [])
+        self.result()
+        self.session.connected = False
+        self.session.changed.emit()
+        self.assertEqual(self.model.view['lastPose'], [])
+
+    def test_unknown_age_and_stale_bad_candidates_are_not_current(self):
+        self.result(age_ms=None)
+        self.assertEqual(self.model.view['lastPose'], [])
+        self.result(age_ms=2000, result={'candidate':[1.,2.,0.], 'fit_state':'weak'})
+        self.assertEqual(self.model.view['questionablePose'], [])

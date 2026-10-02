@@ -61,7 +61,7 @@ ColumnLayout {
             Label { text: entry.value; Layout.fillWidth: true; wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText }
         }
     }
-    Label { text: dataSources.view.error; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    SelectableLabel { text: dataSources.view.error; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
     Label { text: "Запрошено подписок: " + dataSources.view.subscriptions; Layout.fillWidth: true }
     ScrollView {
         id: rawScroll

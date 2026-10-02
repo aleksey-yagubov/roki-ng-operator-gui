@@ -91,6 +91,9 @@ class FakeRobot:
     def sample(self, topic):
         if topic == "body.power":
             return dict(topic=topic, **self.power_sample)
+        if topic == "localisation.state":
+            return dict(topic=topic, valid=False, age_ms=5,
+                        data=self._result('localisation.status', {}))
         data = ({"camera": {"alive": True, "state": "idle"}} if topic == "system.workers"
                 else self.game_state() if topic == "game.state"
                 else {"head": dict(self.head)} if topic == "motion.state"
@@ -124,7 +127,7 @@ class FakeRobot:
                 if op == "hello":
                     assert "versions" not in message["body"]
                     body = dict(robot_id="LOCAL-TEST", boot_id="fake-boot", heartbeat_ms=500,
-                                session_timeout_ms=2000, drive_timeout_ms=350, state="GAME",
+                                session_timeout_ms=2000, drive_timeout_ms=350, state=self.mode,
                                 max_datagram=1400)
                     self._send(envelope("welcome", "hello", body, ident, self.session, self.token), address)
                     continue

@@ -116,7 +116,7 @@ class Control(QObject):
 
     @Property("QVariantMap", notify=changed)
     def view(self):
-        return dict(owns=self.owns, manual=self.owns and self.mode == "MANUAL",
+        return dict(mode=self.mode, owns=self.owns, manual=self.owns and self.mode == "MANUAL",
                     ready=not self.blocked_reason, blockedReason=self.blocked_reason,
                     canEnterManual=self.owns and self.mode != "MANUAL" and not self.pending and not self.uncertain and not self.moving and not self.held,
                     pending=self.pending, moving=self.moving, keyboard=self.keyboard,

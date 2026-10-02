@@ -15,7 +15,7 @@ ColumnLayout {
             currentIndex:model.indexOf(fieldEditor.view.selected)
         }
     }
-    Label { text:fieldEditor.view.notice; wrapMode:Text.Wrap; Layout.fillWidth:true }
+    SelectableLabel { text:fieldEditor.view.notice; wrapMode:Text.Wrap; Layout.fillWidth:true }
     RowLayout {
         Layout.fillWidth:true; Layout.fillHeight:true
         Canvas {

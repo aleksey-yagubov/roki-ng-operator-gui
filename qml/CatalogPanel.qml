@@ -67,5 +67,5 @@ ColumnLayout {
         Button { text: "Сброс очереди"; enabled: controls.view.owns; onClicked: controls.stop(true) }
     }
     Label { text: controls.view.jobOperation + " · " + controls.view.jobStatus + " " + controls.view.jobProgress; Layout.fillWidth: true; wrapMode: Text.Wrap }
-    Label { text: controls.view.error || controls.view.jobReason; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    SelectableLabel { text: controls.view.error || controls.view.jobReason; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
 }

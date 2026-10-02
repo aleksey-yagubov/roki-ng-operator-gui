@@ -19,8 +19,8 @@ ScrollView {
             Button {text:"Статус детектора";enabled:backend.view.connected && !visionTuning.view.busy;onClicked:visionTuning.status()}
             CheckBox {id:watching;text:"Обновлять статус";onToggled:visionTuning.watch(checked && root.visible)}
         }
-        Label {text:visionTuning.view.notice;Layout.fillWidth:true;wrapMode:Text.Wrap}
-        Label {text:controls.view.error;visible:text!=="";Layout.fillWidth:true;wrapMode:Text.Wrap}
+        SelectableLabel {text:visionTuning.view.notice;Layout.fillWidth:true;wrapMode:Text.Wrap}
+        SelectableLabel {text:controls.view.error;visible:text!=="";Layout.fillWidth:true;wrapMode:Text.Wrap}
         Label {text:"Камера и ISP настраиваются в панели «Камера». Видео запрашивается отдельно в «Стримах».";Layout.fillWidth:true;wrapMode:Text.Wrap}
         ComboBox {
             id:previewStream
@@ -94,6 +94,8 @@ ScrollView {
                         onMoved:visionTuning.edit(colourRow.modelData,Math.round(value))
                     }
                     ValueEditor {
+                        objectName: "tuningEditor-" + colourRow.suffix
+                        commitOnFinish: true
                         Layout.preferredWidth:95
                         meta:colourRow.entry.meta;initialValue:colourRow.entry.value
                         onEdited:value => visionTuning.edit(colourRow.modelData,value)
@@ -104,10 +106,11 @@ ScrollView {
                 Layout.fillWidth:true;spacing:6
                 Button {text:"Стандартный фильтр";enabled:!visionTuning.view.busy && profile.count>0;onClicked:visionTuning.defaults("lab")}
                 Button {text:"Сохранить фильтр";enabled:controls.view.owns && !controls.view.pending && !visionTuning.view.busy;onClicked:visionTuning.save("lab")}
-                Button {text:"Запустить детектор на роботе";enabled:controls.view.manual && !controls.view.pending && profile.count>0;onClicked:visionTuning.action("detection.start")}
+                Button {text:"Запустить детектор на роботе";enabled:controls.view.owns && (controls.view.manual || controls.view.mode === "GAME") && !controls.view.pending && profile.count>0;onClicked:visionTuning.action("detection.start")}
                 Button {text:"Остановить детектор";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.action("detection.stop")}
             }
-            Label {text:"Детектор робота (сохранённые параметры, свой номер кадра):";font.bold:true}
+            Label {text:"Площадь: «Минимум пикселей» — размер цветной области, «Минимум площади рамки» — ширина × высота. Введите число, нажмите Enter, затем «Сохранить фильтр».";Layout.fillWidth:true;wrapMode:Text.Wrap}
+            Label {text:"LAB-детектор робота (сохранённые параметры, свой номер кадра). Рамка мяча вратаря показывается отдельно в его видеопотоке:";font.bold:true;Layout.fillWidth:true;wrapMode:Text.Wrap}
             Label {
                 property var result:visionTuning.view.detector.result
                 text:result ? "Кадр "+result.frame_sequence+" · "+(root.names[result.profile] || result.profile)+" · областей: "+result.total_blobs+" · возраст: "+visionTuning.view.detector.age_ms+" мс" : "Результат ещё не получен. Запустите детектор и запросите статус."

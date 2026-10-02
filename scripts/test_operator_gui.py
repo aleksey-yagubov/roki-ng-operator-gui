@@ -538,23 +538,29 @@ def main():
             assert backend.localisation.view['pose']==[], 'Weak geometry must not show a position'
             assert 'Линии плохо' in backend.localisation.view['problems']
             robot.localisation_fit='matched'
+            click("localisationSubscribe")
+            wait_until(lambda: backend.localisation.view['subscribed'])
+            robot.send_data('localisation.state', 1)
             wait_until(lambda: len(backend.localisation.view['pose'])==3)
             command=next(m for m in reversed(robot.requests) if m['op']=='localisation.start')
             assert abs(command['body']['prior'][2]-1.57079632679)<1e-8
             assert not item("localisationStart").isEnabled()
             snapshot("13a-localisation-candidate")
             show("statusDock")
-            wait_until(lambda:not backend.localisation.view['watching'])
+            assert backend.localisation.view['watching']
             before=sum(m['op']=='localisation.status' for m in robot.requests)
             show("localisationDock")
-            wait_until(lambda:backend.localisation.view['watching'] and sum(m['op']=='localisation.status' for m in robot.requests)>before)
-            snapshot("13g-localisation-poll-resumes")
+            assert backend.localisation.view['watching']
+            assert sum(m['op']=='localisation.status' for m in robot.requests)==before
+            snapshot("13g-localisation-subscription-kept")
             robot.localisation_age=1800
             click("localisationRefresh")
             wait_until(lambda: not backend.localisation.pending)
             assert backend.localisation.view['pose']==[]
             assert 'свежей' in item("localisationStatus").property('text')
             snapshot("13b-localisation-stale")
+            click("localisationSubscribe")
+            wait_until(lambda: not backend.localisation.view['watching'])
             click("localisationStop")
             wait_until(lambda: not backend.localisation.view['running'] and not backend.control.pending)
             assert backend.localisation.view['pose']==[]
