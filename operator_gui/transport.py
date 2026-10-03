@@ -195,8 +195,9 @@ class Transport(QObject):
         now = time.monotonic()
         self.pending[self.ident] = dict(op=op, context=context, packet=packet, attempts=1,
                                        sent=now, deadline=now + 0.25,
-                                       expires=now + (20.0 if op in ("camera.start", "videostream.subscribe") else
-                                                      7.0 if op in ("localisation.start", "game.start") else 1.25))
+                                       expires=now + (40.0 if op in ('game.start', 'game.stop') else
+                                                      7.0 if op in ('game.pause', 'game.pickup', 'localisation.start') else
+                                                      20.0 if op in ("camera.start", "videostream.subscribe") else 1.25))
         self._write(packet)
 
     def _write(self, packet):

@@ -24,25 +24,35 @@ ScrollView {
     property var kddockwidgets_min_size: Qt.size(420, 280)
     ColumnLayout {
         width: root.availableWidth
-        SelectableLabel { text: "FIRA · Пенальти · Вратарь"; font.bold: true }
-        SelectableLabel { text: "Наблюдение вычисляет решения без движений. Физический запуск разрешается роботом только после проверки геометрии (game.geometry_verified)."; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        SelectableLabel { text: "Автономная игра"; font.bold: true }
+        SelectableLabel { text: "Запуск включает движения. Стартовый манёвр center настраивается через params: game.forward.kick_off_ride. Повторный ввод — после готовности Pick up."; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        RowLayout {
+            ComboBox { id: role; objectName: "gameRole"; model: ["FIRA_penalty_Goalkeeper", "forward"] }
+            ComboBox { id: entry; objectName: "gameEntry"; model: ["center", "left", "right"]; enabled: role.currentText === "forward" }
+        }
         RowLayout {
             SelectableLabel { text: "Задержка, с" }
             SpinBox { id: delay; objectName: "gameDelay"; from: 0; to: 30; value: 0 }
         }
         Flow {
             Layout.fillWidth: true; spacing: 6
-            Button { objectName: "gameObserve"; text: game.view.fresh && game.view.running && game.view.observeOnly ? "Наблюдение уже запущено" : "Запустить наблюдение"; enabled: game.view.canObserve; onClicked: game.start(true, delay.value) }
-            Button { objectName: "gamePhysicalStart"; text: "Запустить с физическими движениями"; enabled: game.view.canStart; onClicked: game.start(false, delay.value) }
+            Button { objectName: "gameStart"; text: game.view.pickupReady ? "Повторный ввод" : "Запустить игру"; enabled: game.view.canStart; onClicked: game.start(role.currentText, entry.currentText, delay.value) }
+            Button { objectName: "gamePause"; text: "Пауза"; enabled: game.view.canPause; onClicked: game.pause() }
+            Button { objectName: "gameResume"; text: "Продолжить"; enabled: game.view.canResume; onClicked: game.resume() }
+            Button { objectName: "gamePickup"; text: "Pick up"; enabled: game.view.canPickup; onClicked: game.pickup() }
+            Button { objectName: "gameConfirmUpright"; text: "Робот установлен вертикально"; visible: game.view.confirmationRequired; enabled: game.view.canConfirm; onClicked: game.confirmUpright() }
             Button { objectName: "gameStop"; text: "Остановить игру"; enabled: game.view.canStop; onClicked: game.stop() }
             Button { objectName: "gameRefresh"; text: "Запросить статус"; enabled: game.view.canRefresh; onClicked: game.refresh() }
             Button { objectName: "gameSubscribe"; text: game.view.watching ? "Отключить данные игры" : "Получать данные игры"; enabled: game.view.canRefresh && !game.view.subscriptionPending; onClicked: game.watch(!game.view.watching) }
         }
-        SelectableLabel { text: game.view.canObserve && !game.view.canStart ? "Наблюдение само включит MANUAL. Команды движения не отправляются." : game.view.blockedReason; visible: !game.view.canStart; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        SelectableLabel { text: game.view.blockedReason; visible: !game.view.canStart; wrapMode: Text.Wrap; Layout.fillWidth: true }
         SelectableLabel { objectName: "gameError"; text: game.view.error; color: "#b03030"; visible: text.length > 0; wrapMode: Text.Wrap; Layout.fillWidth: true }
-        SelectableLabel { objectName: "gameState"; text: (game.view.fresh ? "" : "Нет актуального статуса. ") + game.view.state + " · " + (game.view.observeOnly ? "наблюдение" : "физические движения"); wrapMode: Text.Wrap; Layout.fillWidth: true }
+        SelectableLabel { objectName: "gameState"; text: (game.view.fresh ? "" : "Нет актуального статуса. ") + game.view.role + " · " + game.view.state + " · " + game.view.phase; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        SelectableLabel { text: "Восстановление: " + game.view.recovery + " · Попытка вставания: " + game.view.recoveryAttempt + (game.view.pickupReady ? " · Готов к переносу" : ""); wrapMode: Text.Wrap; Layout.fillWidth: true }
         SelectableLabel { text: game.view.reason; wrapMode: Text.Wrap; Layout.fillWidth: true }
-        SelectableLabel { text: "Решение: " + game.view.decision + " · Резерв перемещения (оценка): " + game.view.travel + " м · Задание: " + game.view.jobId; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        SelectableLabel { text: "Решение: " + game.view.decision + " · Пройденный путь (одометрия): " + game.view.travel + " м · Задание: " + game.view.jobId; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        SelectableLabel { text: "Оценка положения: " + game.view.position; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        SelectableLabel { text: "Последняя визуальная поправка: " + game.view.correction; wrapMode: Text.Wrap; Layout.fillWidth: true }
         SelectableLabel { text: "Мяч: " + game.view.ball; wrapMode: Text.Wrap; Layout.fillWidth: true }
         Button { objectName: "gameOpenStreams"; text: "Выбрать / запросить видео в «Стримах»"; onClicked: root.requestStreams() }
         ComboBox {

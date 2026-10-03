@@ -44,7 +44,9 @@ class FakeRobot:
         self.silent = False
         self.sequence = 0
         self.log_id = 0
-        self.game_observe_only = True
+        self.game_role = 'FIRA_penalty_Goalkeeper'
+        self.game_entry = 'goalkeeper'
+        self.game_paused = self.game_pickup = self.game_ready = self.game_confirm = False
         self.game_running = True
         self.mode = "GAME"
         self.owner = None
@@ -84,8 +86,10 @@ class FakeRobot:
         self._send(packet)
 
     def game_state(self):
-        return dict(running=self.game_running, state="observing" if self.game_running else "stopped",
-                    observe_only=self.game_observe_only, reason="", decision="hold", ball=None,
+        return dict(running=self.game_running, state="searching" if self.game_running else "stopped",
+                    role=self.game_role, entry=self.game_entry, phase='searching',
+                    paused=self.game_paused, pickup=self.game_pickup, pickup_ready=self.game_ready,
+                    pickup_confirmation_required=self.game_confirm, reason="", decision="hold", ball=None,
                     travel_m=0., job_id=None)
 
     def sample(self, topic):
@@ -156,21 +160,38 @@ class FakeRobot:
         if op == "system.capabilities":
             return dict(simulated=True, future=["video", "osd"],
                         **({"localisation":{"mode":"diagnostic_only"}} if self.localisation_enabled else {}))
-        if op in ("game.start", "game.stop", "game.status"):
+        if op in ("game.start", "game.stop", "game.status", "game.pause", "game.resume", "game.pickup"):
             if op != "game.status":
                 assert self.owner == self.session and body['lease_epoch'] == self.lease
             if op == "game.start":
-                assert self.mode == "MANUAL"
-                assert body['strategy'] == 'FIRA_penalty_Goalkeeper'
+                assert self.mode == "MANUAL" or (self.mode == 'GAME' and self.game_pickup and self.game_ready)
+                assert body['strategy'] in ('FIRA_penalty_Goalkeeper', 'forward')
+                assert set(body) <= {'strategy', 'entry', 'delay_seconds', 'lease_epoch'}
                 assert type(body['delay_seconds']) is int
                 assert 0 <= body['delay_seconds'] <= 30
-                self.game_observe_only = body['observe_only']
-                assert self.game_observe_only or self.values.get('game.geometry_verified') is True
+                self.game_role = body['strategy']
+                if self.game_role == 'forward':
+                    self.game_entry = body.get('entry', 'center')
+                    assert self.game_entry in ('center', 'left', 'right')
+                else:
+                    assert 'entry' not in body
+                    self.game_entry = 'goalkeeper'
+                self.game_paused = self.game_pickup = self.game_ready = self.game_confirm = False
                 self.game_running = True
                 self.mode = "GAME"
             elif op == "game.stop":
                 self.game_running = False
                 self.mode = "MANUAL"
+            elif op in ('game.pause', 'game.resume'):
+                assert self.mode == 'GAME' and self.game_running and not self.game_pickup
+                self.game_paused = op == 'game.pause'
+            elif op == 'game.pickup':
+                assert self.mode == 'GAME' and self.game_running
+                if body.get('confirm'):
+                    assert self.game_pickup and self.game_confirm
+                    self.game_confirm = False
+                self.game_pickup = self.game_paused = True
+                self.game_ready = not self.game_confirm
             return self.game_state()
         if op.startswith('localisation.'):
             assert self.localisation_enabled

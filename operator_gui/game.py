@@ -1,4 +1,4 @@
-"""Explicit FIRA goalkeeper controls; connection alone never starts a game."""
+"""Explicit autonomous game controls; connection alone never starts a game."""
 import json
 import math
 import time
@@ -19,7 +19,6 @@ class Game(QObject):
         self.error = ""
         self.pending = False
         self.received = 0.
-        self.prepared_start = None
         self.clock = QTimer(self)
         self.clock.setInterval(250)
         self.clock.timeout.connect(self.changed.emit)
@@ -34,21 +33,30 @@ class Game(QObject):
     def view(self):
         fresh = self.session.connected and self.received > 0 and time.monotonic()-self.received < 2
         ball = self.state.get('ball')
-        can_prepare = (self.control.owns and self.control.mode == 'IDLE'
-                       and not self.control.pending and not self.control.uncertain
-                       and not self.control.moving and not self.control.held)
+        running = self.state.get('running') is True
+        pickup = self.state.get('pickup') is True
+        paused = self.state.get('paused') is True
+        reentry = fresh and running and pickup and self.state.get('pickup_ready') is True
+        available = self.control.owns and not self.control.pending and not self.control.uncertain
+        active = available and fresh and running and self.control.mode == 'GAME'
         blocked = self.control.blocked_reason
         if self.session.connected and self.control.mode == 'GAME':
             if fresh and self.state.get('running'):
-                mode = 'Наблюдение уже запущено' if self.state.get('observe_only') else 'Игра с движениями уже запущена'
-                blocked = mode + '. Для нового запуска сначала нажмите «Остановить игру».'
+                blocked = ('Можно выбрать роль и место повторного ввода.' if reentry else
+                           'Игра уже запущена. Для нового ввода используйте Pick up или остановите игру.')
                 if not self.control.owns:
                     blocked += ' Для остановки получите управление.'
             else:
                 blocked = 'Робот в режиме GAME. Нажмите «Запросить статус», чтобы узнать состояние игры.'
-        return dict(running=self.state.get('running') is True, fresh=fresh,
+        return dict(running=running, fresh=fresh,
                     state=self.state.get('state', 'Статус не запрошен'),
-                    observeOnly=self.state.get('observe_only', True),
+                    role=self.state.get('role') or '—', phase=self.state.get('phase') or '—',
+                    recovery=self.state.get('recovery') or 'none',
+                    recoveryAttempt=self.state.get('recovery_attempt', 0),
+                    paused=paused, pickup=pickup, pickupReady=fresh and self.state.get('pickup_ready') is True,
+                    confirmationRequired=fresh and self.state.get('pickup_confirmation_required') is True,
+                    position=json.dumps(self.state.get('position'), ensure_ascii=False) if fresh else '—',
+                    correction=json.dumps(self.state.get('last_correction'), ensure_ascii=False) if fresh else '—',
                     reason=self.state.get('reason') or '', error=self.error,
                     decision=self.state.get('decision', 'hold') if fresh else '—',
                     ball=json.dumps(ball, ensure_ascii=False) if fresh and ball else 'Нет актуального мяча',
@@ -56,45 +64,70 @@ class Game(QObject):
                     pending=self.pending, canRefresh=self.session.connected and not self.pending,
                     watching='game.state' in self.data_sources.wanted,
                     subscriptionPending=any(t == 'game.state' for _, t in self.data_sources.pending),
-                    canStart=not self.control.blocked_reason and not self.state.get('running', False),
-                    canObserve=(can_prepare or not self.control.blocked_reason)
-                        and not self.state.get('running', False) and self.prepared_start is None,
+                    canStart=(not self.control.blocked_reason and not running) or (active and reentry),
+                    canPause=active and not paused and not pickup,
+                    canResume=active and paused and not pickup,
+                    canPickup=self.control.owns and self.control.mode == 'GAME' and not pickup
+                        and self.control.pending not in ('game.pickup', 'game.stop', 'motion.stop_hard',
+                                                         'control.release', 'control.acquire', 'mode.set'),
+                    canConfirm=active and pickup and self.state.get('pickup_confirmation_required') is True,
                     canStop=self.control.owns and self.control.pending != 'game.stop',
                     blockedReason=blocked)
 
-    @Slot(bool, float)
-    def start(self, observe_only=True, delay_seconds=0.):
+    @Slot(str, str, float)
+    def start(self, strategy='FIRA_penalty_Goalkeeper', entry='center', delay_seconds=0.):
+        body = dict(strategy=strategy)
+        if strategy == 'forward':
+            body['entry'] = entry
         if (isinstance(delay_seconds, bool) or not math.isfinite(delay_seconds)
                 or not float(delay_seconds).is_integer() or not 0 <= delay_seconds <= 30):
             self.error = 'Задержка должна быть целым числом от 0 до 30 секунд.'
-        elif self.state.get('running'):
-            self.error = 'Сначала остановите текущую игру.'
-        elif observe_only and self.control.mode == 'IDLE' and self.view['canObserve']:
-            self.prepared_start = (True, int(delay_seconds))
-            if self.control.command('mode.set', {'mode': 'MANUAL'}, manual=False,
-                                    context='game:prepare-observation'):
-                self.error = ''
-            else:
-                self.prepared_start = None
-                self.error = self.control.error
-        elif self.control.command('game.start', dict(strategy='FIRA_penalty_Goalkeeper',
-                observe_only=observe_only, delay_seconds=int(delay_seconds)), context='game:start'):
+        elif strategy not in ('forward', 'FIRA_penalty_Goalkeeper') or entry not in ('center', 'left', 'right'):
+            self.error = 'Неизвестная роль или место ввода.'
+        elif not self.view['canStart']:
+            self.error = self.view['blockedReason'] or 'Запуск сейчас недоступен.'
+        elif self.control.command('game.start', body | dict(delay_seconds=int(delay_seconds)),
+                                  manual=self.control.mode != 'GAME', context='game:start'):
             self.error = ''
         else:
             self.error = self.control.error
         self.changed.emit()
 
     @Slot()
+    def pause(self):
+        if self.view['canPause']:
+            self._barrier('game.pause')
+
+    @Slot()
+    def resume(self):
+        if self.view['canResume']:
+            self.control.command('game.resume', {}, manual=False, job=False, context='game:resume')
+
+    @Slot()
+    def pickup(self):
+        if self.view['canPickup']:
+            self._barrier('game.pickup')
+
+    @Slot()
+    def confirmUpright(self):
+        if self.view['canConfirm']:
+            self.control.command('game.pickup', {'confirm': True}, manual=False, job=False,
+                                 context='game:confirm')
+
+    def _barrier(self, op):
+        self.control.stopInput()
+        self.control.barrierIssued.emit()
+        self.control.pending = op
+        self.control.poll_pending = False
+        self.error = ''
+        self.session.interrupt(op, {'lease_epoch': self.control.lease}, 'game:' + op.split('.')[1])
+        self.control.changed.emit()
+
+    @Slot()
     def stop(self):
         if not self.control.owns or self.control.pending == 'game.stop':
             return
-        self.control.stopInput()
-        self.control.barrierIssued.emit()
-        self.control.pending = 'game.stop'
-        self.control.poll_pending = False
-        self.error = ''
-        self.session.interrupt('game.stop', {'lease_epoch': self.control.lease}, 'game:stop')
-        self.control.changed.emit()
+        self._barrier('game.stop')
 
     @Slot()
     def refresh(self):
@@ -121,33 +154,22 @@ class Game(QObject):
 
     def barrier(self):
         self.pending = False
-        self.prepared_start = None
 
     def _connection(self):
         if not self.session.connected:
-            self.prepared_start = None
             self.state = {}
             self.received = 0.
             self.pending = False
         self.changed.emit()
 
     def _response(self, op, result, context):
-        if context == 'game:prepare-observation':
-            prepared, self.prepared_start = self.prepared_start, None
-            if prepared is not None:
-                if result.get('state') == 'MANUAL' and self.control.owns:
-                    self.start(*prepared)
-                else:
-                    self.error = 'Не удалось подготовить режим наблюдения.'
-            self.changed.emit()
-            return
-        if op not in ('game.start', 'game.stop', 'game.status'):
+        if op not in ('game.start', 'game.stop', 'game.status', 'game.pause', 'game.resume', 'game.pickup'):
             return
         if op == 'game.status':
             self.pending = False
         self.state = dict(result)
         self.received = time.monotonic()
-        if op in ('game.start', 'game.stop'):
+        if op != 'game.status':
             self.error = ''
         if op in ('game.start', 'game.stop'):
             self.session.request('system.status')
@@ -155,11 +177,6 @@ class Game(QObject):
 
     def _failed(self, op, message, context):
         if op.startswith('data.') and context == 'game.state':
-            self.error = message
-            self.changed.emit()
-            return
-        if context == 'game:prepare-observation':
-            self.prepared_start = None
             self.error = message
             self.changed.emit()
             return
