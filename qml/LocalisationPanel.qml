@@ -29,14 +29,14 @@ ScrollView {
         Button {
             objectName: "localisationStart"
             text: "Запустить с этой позой"
-            enabled: localisation.view.available && !localisation.view.running && controls.view.owns && (controls.view.manual || controls.view.mode === "GAME") && !controls.view.pending
+            enabled: localisation.view.available && !localisation.view.running && controls.view.owns && controls.view.manual && !controls.view.pending
             onClicked: localisation.start(Number(priorX.text.replace(",", ".")), Number(priorY.text.replace(",", ".")), Number(priorYaw.text.replace(",", ".")))
         }
-        Button { objectName: "localisationStop"; text: "Остановить локализацию"; enabled: localisation.view.available && controls.view.owns && !controls.view.pending; onClicked: localisation.stop() }
+        Button { objectName: "localisationStop"; text: "Остановить локализацию"; enabled: localisation.view.available && controls.view.owns && controls.view.mode !== "GAME" && !controls.view.pending; onClicked: localisation.stop() }
     }
     SelectableLabel { objectName: "localisationStatus"; text: localisation.view.status; font.bold: true; Layout.fillWidth: true; wrapMode: Text.Wrap }
     SelectableLabel { text: localisation.view.error; visible: text.length > 0; color: "#b03030"; Layout.fillWidth: true; wrapMode: Text.Wrap }
-    Label { text:"Захват с IMU запускается в «Камере». Для обработанного видео выберите источник localisation в «Стримах», затем добавьте просмотр."; wrapMode:Text.Wrap; Layout.fillWidth:true }
+    Label { text:"Захват с IMU запускается в «Камере». Для обработанного видео выберите источник localisation в «Стримах». Во время игры запуском и окнами наблюдения управляет стратегия; визуальная поправка принимается после трёх согласованных кадров в стойке."; wrapMode:Text.Wrap; Layout.fillWidth:true }
     Label { objectName:"localisationProblems"; text:localisation.view.problems; visible:text.length>0; wrapMode:Text.Wrap; Layout.fillWidth:true }
     SelectableLabel {
         objectName: "localisationResultSummary"
@@ -88,7 +88,7 @@ ScrollView {
             c.fillStyle="white"; c.fillText("+X ↑   +Y ←   "+g.length+" × "+g.width+" м",8,18)
         }
     }
-    Label { text: "Оранжевый: текущий диагностический кандидат. Серый: последняя пригодная оценка. Красный контур: сомнительный кандидат, не принятая позиция. Если координаты не присланы, отметки нет."; Layout.fillWidth: true; wrapMode: Text.Wrap }
+    Label { text: "Оранжевый: пригодная свежая визуальная оценка. Серый: последняя пригодная оценка. Красный контур: сомнительный кандидат, не принятая позиция. Это не подтверждение измеренной полевой точности."; Layout.fillWidth: true; wrapMode: Text.Wrap }
     Label {
         Layout.fillWidth: true; wrapMode: Text.Wrap
         text: {
@@ -98,7 +98,8 @@ ScrollView {
                 "; отрезков: "+(r.lines ?? "—")+"; круг: "+(r.circle ? "да" : "нет")+"; пар ворот: "+(r.goal_pairs ?? 0)+
                 "\nСовпадение: "+({matched:"согласовано",weak:"слабое",ambiguous:"неоднозначно"}[r.fit_state] || "нет оценки")+
                 "; доля совпавших: "+(r.inlier_fraction===undefined ? "—" : (100*r.inlier_fraction).toFixed(0)+"%")+
-                "; остаток: "+(r.median_residual_m===undefined ? "—" : r.median_residual_m.toFixed(3)+" м")+
+                "; остаток: "+(r.median_residual_m===undefined || r.median_residual_m===null ? "—" : r.median_residual_m.toFixed(3)+" м")+
+                "\nЭтапы, мс: "+JSON.stringify(r.timings_ms || {})+
                 "\nКарта запуска: "+(v.configurationId || "—")+". Изменения редактора требуют перезапуска локализации."
         }
     }

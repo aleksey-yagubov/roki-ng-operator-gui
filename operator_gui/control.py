@@ -447,7 +447,8 @@ class Control(QObject):
                 self.headChanged.emit()
             return
         relevant = op in ("control.acquire", "control.release", "session.heartbeat", "mode.set",
-                          "system.status", "game.start", "game.stop", "game.status", "motion.head",
+                          "system.status", "game.start", "game.stop", "game.status", "game.pause",
+                          "game.resume", "game.pickup", "motion.head",
                           "job.status", "motion.stop_hard")
         if not relevant and op != self.pending and not (result.get("job_id") and result.get("accepted")):
             return
@@ -478,7 +479,7 @@ class Control(QObject):
                 self.lease = None
             if not self.owns or self.mode != "MANUAL":
                 self.stopInput()
-        elif op in ("game.start", "game.stop", "game.status"):
+        elif op in ("game.start", "game.stop", "game.status", "game.pause", "game.resume", "game.pickup"):
             if result.get("running") is True:
                 self.mode = "GAME"
                 self.stopInput()

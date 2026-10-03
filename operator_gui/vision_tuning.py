@@ -26,6 +26,7 @@ class VisionTuning(QObject):
         self.queue=[];self.busy=False;self.notice='Загрузите настройки с робота.'
         self.catalog_dirty=False
         self.detector={};self.source=QImage();self.overlay=QImage()
+        self.detector_mode='colour'
         self.lab=self.rgb=None;self.serial=0;self.selected_pixels=0;self.source_label='Нет снимка'
         self.timer=QTimer(self);self.timer.setInterval(1000);self.timer.timeout.connect(self.status)
         self.preview_timer=QTimer(self);self.preview_timer.setInterval(200);self.preview_timer.timeout.connect(self.preview_tick)
@@ -45,7 +46,7 @@ class VisionTuning(QObject):
     @Property('QVariantMap',notify=changed)
     def view(self):
         return dict(profiles=self.profiles,profile=self.profile,labRows=self.rows('lab'),
-            busy=self.busy,notice=self.notice,previewStream=self.preview_stream,detector=self.detector,
+            busy=self.busy,notice=self.notice,previewStream=self.preview_stream,detector=self.detector,detectorMode=self.detector_mode,
             serial=self.serial,hasImage=not self.source.isNull(),pixels=self.selected_pixels,sourceLabel=self.source_label,
             live=self.preview_timer.isActive(),dirty=bool(self.drafts),watching=self.timer.isActive(),metas=self.metas,values=self.values|self.drafts)
 
@@ -115,6 +116,11 @@ class VisionTuning(QObject):
             self.detector=result
         elif context=='tuning:action':
             self.detector=result
+            if op=='detection.start':
+                self.timer.start()
+                self.notice='Проверка запущена. В «Стримах» обновите список и смотрите detection. Используются сохранённые параметры.'
+            else:
+                self.notice='Проверка остановлена; камера и игровое зрение не отключаются.'
             self.changed.emit();return
         self.next()
 
@@ -150,9 +156,19 @@ class VisionTuning(QObject):
             'expected_values':{k:self.values[k] for k in keys}},manual=False,job=False,context='tuning:save')
 
     @Slot(str)
+    def selectDetector(self,mode):
+        if mode in ('colour','ball'):
+            self.detector_mode=mode;self.changed.emit()
+
+    @Slot(str)
     def action(self,op):
         if op not in ('detection.start','detection.stop'):return
-        args={'profile':self.profile} if op=='detection.start' else {}
+        if op=='detection.start' and self.detector_mode=='colour' and self.profile not in self.profiles:
+            self.notice='Сначала загрузите настройки и выберите цветовой фильтр.';self.changed.emit();return
+        args=({'mode':self.detector_mode,'profile':self.profile} if self.detector_mode=='colour'
+              else {'mode':'ball'}) if op=='detection.start' else {}
+        if op=='detection.start' and self.detector_mode=='ball' and self.control.mode=='GAME':
+            self.notice='Остановите игру перед отдельной диагностикой мяча.';self.changed.emit();return
         sent=self.control.command(op,args,manual=op.endswith('.start') and self.control.mode != 'GAME',job=False,context='tuning:action')
         if not sent:
             self.notice=self.control.error;self.changed.emit()
@@ -197,6 +213,9 @@ class VisionTuning(QObject):
         self.capture_snapshot()
 
     def capture_snapshot(self):
+        if self.preview_stream in ('detection','localisation'):
+            self.notice='Для пипетки выберите исходное видео camera, а не размеченный диагностический поток.'
+            self.changed.emit();return
         required=[f'vision.{self.profile}.{axis}_{suffix}' for axis in ('l','a','b') for suffix in ('min','max')]
         if self.busy or any(k not in self.values for k in required):
             self.notice='Сначала загрузите настройки и выберите цветовой фильтр.';self.changed.emit();return

@@ -116,7 +116,7 @@ ApplicationWindow {
                         MenuItem { text: "Слоты"; onTriggered: showDock(slotsDock) }
                         MenuItem { text: "Тесты"; onTriggered: showDock(testsDock) }
                         MenuItem { text: "Параметры"; onTriggered: showDock(parametersDock) }
-                        MenuItem { text: "Вратарь FIRA"; onTriggered: showDock(gameDock) }
+                        MenuItem { text: "Игра"; onTriggered: showDock(gameDock) }
                         MenuItem { text: "Локализация"; onTriggered: showDock(localisationDock) }
                         MenuItem { text: "Поле и ворота"; onTriggered: showDock(fieldDock) }
                         MenuItem { text: "Цвета и детекция"; onTriggered: showDock(visionDock) }
@@ -244,7 +244,7 @@ ApplicationWindow {
             id: gameDock
             objectName: "gameDock"
             uniqueName: "game"
-            title: "Вратарь FIRA"
+            title: "Игра"
             GamePanel { anchors.fill: parent; anchors.margins: 8; onRequestStreams: window.showDock(videoDock) }
         }
         KDDW.DockWidget {
