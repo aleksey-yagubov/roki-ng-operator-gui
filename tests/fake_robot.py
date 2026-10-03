@@ -96,8 +96,8 @@ class FakeRobot:
         if topic == "body.power":
             return dict(topic=topic, **self.power_sample)
         if topic == "localisation.state":
-            return dict(topic=topic, valid=False, age_ms=5,
-                        data=self._result('localisation.status', {}))
+            state=self._result('localisation.status', {})
+            return dict(topic=topic, valid=state['running'] and state['result']['valid'], age_ms=5, data=state)
         data = ({"camera": {"alive": True, "state": "idle"}} if topic == "system.workers"
                 else self.game_state() if topic == "game.state"
                 else {"head": dict(self.head)} if topic == "motion.state"
@@ -159,7 +159,7 @@ class FakeRobot:
                         workers={"motherboard": {"alive": True, "state": "ready"}})
         if op == "system.capabilities":
             return dict(simulated=True, future=["video", "osd"],
-                        **({"localisation":{"mode":"diagnostic_only"}} if self.localisation_enabled else {}))
+                        **({"localisation":{"mode":"stationary_correction"}} if self.localisation_enabled else {}))
         if op in ("game.start", "game.stop", "game.status", "game.pause", "game.resume", "game.pickup"):
             if op != "game.status":
                 assert self.owner == self.session and body['lease_epoch'] == self.lease
@@ -203,11 +203,11 @@ class FakeRobot:
             elif op=='localisation.stop':
                 assert body['lease_epoch']==self.lease
                 self.localisation_running=False
-            return dict(state='ready',running=self.localisation_running,mode='diagnostic_only',
+            return dict(state='ready',running=self.localisation_running,mode='visual_pose',
                         age_ms=self.localisation_age,error=None,configuration_id='a'*16,
                         geometry=dict(length=3.35,width=2.35,carpet_length=4.,carpet_width=3.,
                                       paint_width=.05,circle_diameter=.5),
-                        result=dict(candidate=[-1.2,-.8,.4],valid=False,fit_state=getattr(self,'localisation_fit','weak'),
+                        result=dict(candidate=[-1.2,-.8,.4],valid=getattr(self,'localisation_fit','weak')=='matched',fit_state=getattr(self,'localisation_fit','weak'),
                                     lines=5,circle=True,inlier_fraction=.4,median_residual_m=.15,
                                     frame_sequence=123) if self.localisation_running else None)
         if op == "camera.capabilities":

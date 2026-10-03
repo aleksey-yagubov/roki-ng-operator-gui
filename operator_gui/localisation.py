@@ -10,7 +10,7 @@ def candidate_kind(result):
     if not (isinstance(pose, list) and len(pose) == 3 and
             all(type(x) in (float, int) and math.isfinite(x) for x in pose)):
         return 'none'
-    if (result.get('ambiguous') or result.get('fit_state') in ('weak', 'ambiguous', 'rejected')
+    if (not result.get('valid') or result.get('ambiguous') or result.get('fit_state') in ('weak', 'ambiguous', 'rejected')
             or result.get('reason') in ('motion_discontinuity', 'insufficient_observations')):
         return 'questionable'
     return 'usable'
@@ -55,25 +55,25 @@ class Localisation(QObject):
         kind = candidate_kind(result)
         sane = kind != 'none'
         fresh = (self.session.connected and self.state.get('running', False) and
-                 not self.state.get('error') and age is not None and 0 <= age <= 1500)
+                 not self.state.get('error') and age is not None and 0 <= age <= 500)
         current_pose = pose if fresh and kind == 'usable' else []
         last_age = (max(0, round((time.monotonic()-self.last_pose_at)*1000))
                     if self.last_pose_at is not None else None)
         reason = result.get('reason') or ''
         summary = ('Нет результата' if not result else
-                   f"Недостаточно наблюдений (insufficient_observations): отрезков {result.get('lines', 0)}, требуется минимум 3"
+                   f"Недостаточно наблюдений (insufficient_observations): отрезков {result.get('lines', 0)}, нет достаточных ориентиров"
                    if reason == 'insufficient_observations' else
                    'Отклонён скачок позиции (motion_discontinuity)' if reason == 'motion_discontinuity' else
                    'Неоднозначная позиция (ambiguous)' if result.get('ambiguous') or result.get('fit_state') == 'ambiguous' else
                    'Слабое совпадение разметки (weak)' if result.get('fit_state') == 'weak' else
                    'Оценка отклонена (rejected)' if result.get('fit_state') == 'rejected' else
-                   'Согласованный диагностический кандидат (matched)' if kind == 'usable' else
+                   'Пригодная визуальная оценка (matched)' if kind == 'usable' else
                    'Позиция не определена')
         if result and not fresh:
             summary += ' · нет свежей оценки'
         problems=[]
         if result:
-            if result.get('lines',0)<3:problems.append('Недостаточно отрезков для сопоставления')
+            if result.get('lines',0)<3 and not result.get('valid'):problems.append('Мало отрезков; проверяются также круг и ворота')
             if not result.get('circle'):problems.append('Круг не найден или виден неполностью')
             if not result.get('goal_pairs'):problems.append('Нет пригодной пары цветных стоек')
             if result.get('goal_rejected'):problems.append(f"Цветных областей без подтверждения ворот: {result['goal_rejected']} (размер, положение на карте или неопределённая поза)")
@@ -81,6 +81,7 @@ class Localisation(QObject):
             if result.get('ambiguous'):problems.append('Несколько возможных позиций: сторона поля не определена')
             if result.get('reason')=='motion_discontinuity':problems.append('Скачок превышает допустимую скорость: проверьте наблюдения или задайте позу после перестановки')
             if not fresh:problems.append('Оценка устарела: возможна задержка обработки или потеря кадров/IMU')
+            if result.get('detector_errors'):problems.append('Нет наблюдений/ошибка этапов: '+', '.join(result['detector_errors']))
         return dict(problems='\n'.join(problems),available=self.available, pending=self.pending, checking=self.checking, checked=self.checked,
                     running=self.state.get('running', False),
                     watching='localisation.state' in self.data_sources.wanted,
@@ -104,7 +105,8 @@ class Localisation(QObject):
                             'Нет свежей оценки' if not fresh or not sane else
                             'Положение неоднозначно — сторона поля не определена' if result.get('ambiguous') else
                             'Слабое совпадение разметки — положение не определено' if result.get('fit_state') == 'weak' else
-                            'Диагностический кандидат — не подтверждённая позиция'))
+                            'Визуальная позиция определена' if result.get('valid') else
+                            'Кандидат не принят'))
 
     @Slot()
     def check(self):
@@ -155,11 +157,14 @@ class Localisation(QObject):
         result = state.get('result') or {}
         age = state.get('age_ms')
         if (candidate_kind(result) == 'usable' and state.get('running') and not state.get('error')
-                and type(age) in (int, float) and math.isfinite(age) and age >= 0):
+                and type(age) in (int, float) and math.isfinite(age) and 0 <= age <= 500):
             self.last_pose = list(result['candidate'])
             self.last_pose_at = self.received - age / 1000
 
     def command(self, op, args, manual=True):
+        if self.control.mode == 'GAME':
+            self.notice='Во время игры локализацией управляет стратегия. Просмотр данных и видео доступен.'
+            self.changed.emit();return
         if not self.control.command(op, args, manual=manual, job=False, context='localisation:action'):
             self.notice = self.control.error
             self.changed.emit()
