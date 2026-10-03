@@ -9,6 +9,13 @@ ScrollView {
     clip:true
     property var names:({orange_ball:"Оранжевый мяч",green_field:"Зелёное поле",white_marking:"Белая разметка",blue_posts:"Синие стойки",yellow_posts:"Жёлтые стойки",white_posts:"Белые стойки"})
     property var labels:({l_min:"L минимум",l_max:"L максимум",a_min:"a минимум",a_max:"a максимум",b_min:"b минимум",b_max:"b максимум",pixels_min:"Минимум пикселей",box_area_min:"Минимум площади рамки"})
+    property string diagnosticFrame: ""
+    function updateDiagnosticFrame() { diagnosticFrame = streams.imageUrl("detection") }
+    Connections {
+        target: streams
+        function onFramesChanged() { root.updateDiagnosticFrame() }
+        function onChanged() { root.updateDiagnosticFrame() }
+    }
     onVisibleChanged: { visionTuning.watch(visible && watching.checked); if (!visible) visionTuning.live(false) }
     Component.onDestruction: { visionTuning.watch(false); visionTuning.live(false) }
     ColumnLayout {
@@ -17,7 +24,7 @@ ScrollView {
             Layout.fillWidth:true;spacing:6
             Button {text:"Загрузить настройки";enabled:backend.view.connected && !visionTuning.view.busy;onClicked:visionTuning.refresh()}
             Button {text:"Статус детектора";enabled:backend.view.connected && !visionTuning.view.busy;onClicked:visionTuning.status()}
-            CheckBox {id:watching;text:"Обновлять статус";onToggled:visionTuning.watch(checked && root.visible)}
+            CheckBox {id:watching;text:"Обновлять статус";checked:visionTuning.view.watching;onToggled:visionTuning.watch(checked && root.visible)}
         }
         SelectableLabel {text:visionTuning.view.notice;Layout.fillWidth:true;wrapMode:Text.Wrap}
         SelectableLabel {text:controls.view.error;visible:text!=="";Layout.fillWidth:true;wrapMode:Text.Wrap}
@@ -106,16 +113,42 @@ ScrollView {
                 Layout.fillWidth:true;spacing:6
                 Button {text:"Стандартный фильтр";enabled:!visionTuning.view.busy && profile.count>0;onClicked:visionTuning.defaults("lab")}
                 Button {text:"Сохранить фильтр";enabled:controls.view.owns && !controls.view.pending && !visionTuning.view.busy;onClicked:visionTuning.save("lab")}
-                Button {text:"Запустить детектор на роботе";enabled:controls.view.owns && (controls.view.manual || controls.view.mode === "GAME") && !controls.view.pending && profile.count>0;onClicked:visionTuning.action("detection.start")}
-                Button {text:"Остановить детектор";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.action("detection.stop")}
             }
             Label {text:"Площадь: «Минимум пикселей» — размер цветной области, «Минимум площади рамки» — ширина × высота. Введите число, нажмите Enter, затем «Сохранить фильтр».";Layout.fillWidth:true;wrapMode:Text.Wrap}
-            Label {text:"LAB-детектор робота (сохранённые параметры, свой номер кадра). Рамка мяча вратаря показывается отдельно в его видеопотоке:";font.bold:true;Layout.fillWidth:true;wrapMode:Text.Wrap}
+            Label {text:"Проверка на роботе — сохранённые thresholds, без команд движения";font.bold:true;Layout.fillWidth:true;wrapMode:Text.Wrap}
+            SelectableLabel {text:visionTuning.view.detector.error || visionTuning.view.detector.video?.error || "";visible:text.length>0;color:"#b03030";Layout.fillWidth:true;wrapMode:Text.Wrap}
+            ComboBox {
+                objectName:"tuningDetectorMode"
+                model:["LAB: выбранный цвет", "Мяч: игровой алгоритм + IMU"]
+                currentIndex:visionTuning.view.detectorMode === "ball" ? 1 : 0
+                onActivated:visionTuning.selectDetector(currentIndex === 1 ? "ball" : "colour")
+                Layout.fillWidth:true
+            }
+            Flow {
+                Layout.fillWidth:true;spacing:6
+                Button {objectName:"tuningDetectorStart";text:"Запустить проверку";enabled:controls.view.owns && (controls.view.manual || (controls.view.mode === "GAME" && visionTuning.view.detectorMode === "colour")) && (visionTuning.view.detectorMode === "ball" || profile.count>0) && !controls.view.pending && !visionTuning.view.detector.running;onClicked:visionTuning.action("detection.start")}
+                Button {text:"Остановить проверку";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.action("detection.stop")}
+                Button {text:"Обновить список стримов";enabled:backend.view.connected;onClicked:streams.refresh()}
+            }
+            Label {text:"После запуска в «Стримах» выберите detection → «Смотреть»: видео появится ниже. Маски вычислены на исходном кадре робота; черновик ползунков на них не влияет до сохранения. Для пипетки используйте camera.";Layout.fillWidth:true;wrapMode:Text.Wrap}
+            Image {
+                objectName:"tuningRobotVideo"
+                Layout.fillWidth:true;Layout.preferredHeight:source.toString() !== "" ? 520 : 0
+                fillMode:Image.PreserveAspectFit;cache:false;source:root.diagnosticFrame
+            }
+            Label {
+                property var reception: { streams.view; return streams.reception("detection") }
+                visible:reception.stalled || false
+                text:"Нет новых диагностических кадров — изображение выше устарело. Проверьте статус детектора и камеры."
+                color:"#b03030";Layout.fillWidth:true;wrapMode:Text.Wrap
+            }
             Label {
                 property var result:visionTuning.view.detector.result
-                text:result ? "Кадр "+result.frame_sequence+" · "+(root.names[result.profile] || result.profile)+" · областей: "+result.total_blobs+" · возраст: "+visionTuning.view.detector.age_ms+" мс" : "Результат ещё не получен. Запустите детектор и запросите статус."
+                text:result ? "Кадр "+result.frame_sequence+" · "+(visionTuning.view.detector.mode === "ball" ? (result.valid ? "мяч найден: X="+result.x_m.toFixed(3)+", Y="+result.y_m.toFixed(3)+" м" : "мяч не принят: "+result.reason) : (root.names[result.profile] || result.profile)+" · областей: "+result.total_blobs+" · отсев по площади: "+result.area_rejected)+" · возраст: "+visionTuning.view.detector.age_ms+" мс" : "Результат ещё не получен. Запустите детектор и запросите статус."
                 Layout.fillWidth:true;wrapMode:Text.Wrap
             }
+            Label {text:"Мяч: сверху — исходник с решениями и оранжевая маска; снизу — зелёная и белая опора. selected — выбран; no_field — нет опоры; projection — луч вне калибровки/над горизонтом; range — вне допустимой дальности; area_rejected — отсев по площади. Красные рамки — отклонённые кандидаты. Выбор прекращается на первом подходящем из десяти нижних кандидатов, как в игре.";Layout.fillWidth:true;wrapMode:Text.Wrap}
+            Label {text:"Координаты мяча: X вперёд, Y влево относительно направления головы, метры. Нужны синхронизация IMU и профиль камеры. Диагностика не ставит робота в стойку: высота камеры должна соответствовать game.camera_height_m; у расслабленного робота дальность может быть неверной. Линии, круг и ворота проверяются через «Локализацию» и стрим localisation.";Layout.fillWidth:true;wrapMode:Text.Wrap}
             RawDetails {text:JSON.stringify(visionTuning.view.detector,null,2);Layout.fillWidth:true}
         }
         Button {text:"Отменить все черновики";enabled:visionTuning.view.dirty;onClicked:visionTuning.discard()}

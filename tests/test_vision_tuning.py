@@ -11,6 +11,38 @@ from tests.test_field_editor import Session,Control
 
 
 class TuningTests(unittest.TestCase):
+    def test_colour_diagnostic_requires_loaded_profile_but_ball_does_not(self):
+        self.control.mode='MANUAL'
+        self.model.profile='';self.model.profiles=[]
+        self.model.action('detection.start')
+        self.assertFalse(self.control.commands)
+        self.assertIn('загрузите настройки',self.model.notice)
+        self.model.selectDetector('ball')
+        self.model.action('detection.start')
+        self.assertEqual(self.control.commands[-1][0],('detection.start',{'mode':'ball'}))
+
+    def test_ball_diagnostic_uses_explicit_mode_and_refuses_active_game(self):
+        self.control.mode='MANUAL'
+        self.model.selectDetector('ball')
+        self.model.action('detection.start')
+        args,kwargs=self.control.commands[-1]
+        assert args==('detection.start',{'mode':'ball'})
+        assert kwargs['manual'] and not kwargs['job']
+        self.control.commands.clear();self.control.mode='GAME'
+        self.model.action('detection.start')
+        assert not self.control.commands and 'Остановите игру' in self.model.notice
+
+    def test_processed_video_is_not_used_for_threshold_eyedropper(self):
+        self.model.selectStream('detection')
+        self.model.snapshot()
+        assert self.model.source.isNull() and not self.model.drafts
+        assert 'исходное видео' in self.model.notice
+
+    def test_start_ack_enables_status_watch_without_camera_or_motion_commands(self):
+        self.model.response('detection.start',{'mode':'ball','running':True},'tuning:action')
+        assert self.model.view['watching'] and self.model.detector['running']
+        assert not self.control.commands
+
     def test_detector_can_start_in_game(self):
         self.control.mode = 'GAME'
         self.model.action('detection.start')
