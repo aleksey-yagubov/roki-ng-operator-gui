@@ -40,6 +40,16 @@ class GameTests(unittest.TestCase):
         QTest.qWait(600)
         self.assertFalse(any(m['op'].startswith('game.') for m in self.robot.requests))
 
+    def test_visual_localisation_setting_loads_and_saves_without_starting_game(self):
+        self.manual()
+        self.game.loadSettings()
+        wait_until(lambda: self.game.view['visualLocalisationKnown'])
+        self.assertTrue(self.game.view['visualLocalisation'])
+        self.game.setVisualLocalisation(False)
+        wait_until(lambda: not self.game.view['visualLocalisation'])
+        self.assertIs(self.robot.values['game.use_visual_localisation'], False)
+        self.assertFalse(any(m['op'] == 'game.start' for m in self.robot.requests))
+
     def test_read_only_status_without_lease(self):
         self.connect()
         self.game.refresh()
@@ -62,7 +72,7 @@ class GameTests(unittest.TestCase):
 
     def test_roles_start_stop_keep_lease_and_unblock_manual(self):
         self.manual()
-        for role in ('FIRA_penalty_Goalkeeper', 'forward'):
+        for role in ('FIRA_penalty_Goalkeeper', 'forward', 'ball_kick_test', 'simple_football'):
             self.game.start(role, 'left', 2.)
             wait_until(lambda: self.game.view['running'] and self.control.mode == 'GAME')
             self.assertTrue(self.control.owns)
@@ -72,7 +82,7 @@ class GameTests(unittest.TestCase):
             wire = [m for m in self.robot.requests if m['op'] == 'game.start'][-1]['body']
             self.assertIs(type(wire['delay_seconds']), int)
             self.assertEqual(wire['delay_seconds'], 2)
-            self.assertEqual(wire.get('entry'), 'left' if role == 'forward' else None)
+            self.assertEqual(wire.get('entry'), 'left' if role in ('forward', 'simple_football') else None)
             self.assertFalse(self.control.moving)
             self.game.stop()
             wait_until(lambda: not self.game.view['running'] and self.control.mode == 'MANUAL')

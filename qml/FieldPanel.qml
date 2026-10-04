@@ -8,6 +8,7 @@ ColumnLayout {
     RowLayout {
         Button { text:"Загрузить карту"; enabled:backend.view.connected && !fieldEditor.view.busy; onClicked:fieldEditor.refresh() }
         Button { text:"+ Метка";enabled:fieldEditor.view.available && !fieldEditor.view.busy;onClicked:fieldEditor.addMark() }
+        Button { objectName:"competitionFieldTemplate";text:"Шаблон 3,40 × 2,40";enabled:fieldEditor.view.available && !fieldEditor.view.busy;onClicked:fieldEditor.competitionTemplate() }
         ComboBox {
             Layout.fillWidth:true
             model:fieldEditor.view.keys.filter(k => k.startsWith("field."))
@@ -16,6 +17,12 @@ ColumnLayout {
         }
     }
     SelectableLabel { text:fieldEditor.view.notice; wrapMode:Text.Wrap; Layout.fillWidth:true }
+    RowLayout {
+        visible:fieldEditor.view.draftCount>0
+        Button { text:"Сохранить всю карту";enabled:controls.view.owns && !controls.view.pending && !fieldEditor.view.busy;onClicked:fieldEditor.saveAll() }
+        Button { text:"Отменить все черновики";enabled:!fieldEditor.view.busy;onClicked:fieldEditor.discardAll() }
+        Label { text:fieldEditor.view.draftCount+" объектов изменено" }
+    }
     RowLayout {
         Layout.fillWidth:true; Layout.fillHeight:true
         Canvas {
@@ -82,6 +89,7 @@ ColumnLayout {
             ColumnLayout {
                 width:parent.width
                 ObjectEditor {
+                    enabled:!fieldEditor.view.busy
                     Layout.fillWidth:true
                     fields:fieldEditor.view.meta.fields || ({})
                     initialValue:fieldEditor.view.draft

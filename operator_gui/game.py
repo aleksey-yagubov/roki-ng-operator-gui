@@ -16,6 +16,7 @@ class Game(QObject):
         data_sources.sampleReceived.connect(self._sample)
         data_sources.changed.connect(self.changed.emit)
         self.state = {}
+        self.visual_localisation = None
         self.error = ""
         self.pending = False
         self.received = 0.
@@ -49,6 +50,8 @@ class Game(QObject):
             else:
                 blocked = 'Робот в режиме GAME. Нажмите «Запросить статус», чтобы узнать состояние игры.'
         return dict(running=running, fresh=fresh,
+                    visualLocalisationKnown=self.visual_localisation is not None,
+                    visualLocalisation=self.visual_localisation is True,
                     state=self.state.get('state', 'Статус не запрошен'),
                     role=self.state.get('role') or '—', phase=self.state.get('phase') or '—',
                     recovery=self.state.get('recovery') or 'none',
@@ -74,15 +77,28 @@ class Game(QObject):
                     canStop=self.control.owns and self.control.pending != 'game.stop',
                     blockedReason=blocked)
 
+    @Slot()
+    def loadSettings(self):
+        if self.session.connected:
+            self.session.request('params.get', {'key': 'game.use_visual_localisation'}, 'game:visual-setting')
+
+    @Slot(bool)
+    def setVisualLocalisation(self, enabled):
+        if self.visual_localisation is None or not self.view['canStart']:
+            return
+        self.control.command('params.set', {'key': 'game.use_visual_localisation', 'value': enabled,
+                             'expected_value': self.visual_localisation},
+                             manual=False, job=False, context='game:visual-setting')
+
     @Slot(str, str, float)
     def start(self, strategy='FIRA_penalty_Goalkeeper', entry='center', delay_seconds=0.):
         body = dict(strategy=strategy)
-        if strategy == 'forward':
+        if strategy in ('forward', 'simple_football'):
             body['entry'] = entry
         if (isinstance(delay_seconds, bool) or not math.isfinite(delay_seconds)
                 or not float(delay_seconds).is_integer() or not 0 <= delay_seconds <= 30):
             self.error = 'Задержка должна быть целым числом от 0 до 30 секунд.'
-        elif strategy not in ('forward', 'FIRA_penalty_Goalkeeper') or entry not in ('center', 'left', 'right'):
+        elif strategy not in ('forward', 'FIRA_penalty_Goalkeeper', 'ball_kick_test', 'simple_football') or entry not in ('center', 'left', 'right'):
             self.error = 'Неизвестная роль или место ввода.'
         elif not self.view['canStart']:
             self.error = self.view['blockedReason'] or 'Запуск сейчас недоступен.'
@@ -158,11 +174,17 @@ class Game(QObject):
     def _connection(self):
         if not self.session.connected:
             self.state = {}
+            self.visual_localisation = None
             self.received = 0.
             self.pending = False
         self.changed.emit()
 
     def _response(self, op, result, context):
+        if context == 'game:visual-setting' and op in ('params.get', 'params.set'):
+            self.visual_localisation = result['value']
+            self.error = ''
+            self.changed.emit()
+            return
         if op not in ('game.start', 'game.stop', 'game.status', 'game.pause', 'game.resume', 'game.pickup'):
             return
         if op == 'game.status':
@@ -176,6 +198,10 @@ class Game(QObject):
         self.changed.emit()
 
     def _failed(self, op, message, context):
+        if context == 'game:visual-setting':
+            self.error = message
+            self.changed.emit()
+            return
         if op.startswith('data.') and context == 'game.state':
             self.error = message
             self.changed.emit()

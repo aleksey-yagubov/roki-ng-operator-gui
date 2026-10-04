@@ -119,14 +119,14 @@ ScrollView {
             SelectableLabel {text:visionTuning.view.detector.error || visionTuning.view.detector.video?.error || "";visible:text.length>0;color:"#b03030";Layout.fillWidth:true;wrapMode:Text.Wrap}
             ComboBox {
                 objectName:"tuningDetectorMode"
-                model:["LAB: выбранный цвет", "Мяч: игровой алгоритм + IMU"]
-                currentIndex:visionTuning.view.detectorMode === "ball" ? 1 : 0
-                onActivated:visionTuning.selectDetector(currentIndex === 1 ? "ball" : "colour")
+                model:["LAB: выбранный цвет", "Мяч: игровой алгоритм + IMU", "Simple football: мяч и ворота (base_stand)"]
+                currentIndex:visionTuning.view.detectorMode === "football" ? 2 : visionTuning.view.detectorMode === "ball" ? 1 : 0
+                onActivated:visionTuning.selectDetector(currentIndex === 2 ? "football" : currentIndex === 1 ? "ball" : "colour")
                 Layout.fillWidth:true
             }
             Flow {
                 Layout.fillWidth:true;spacing:6
-                Button {objectName:"tuningDetectorStart";text:"Запустить проверку";enabled:controls.view.owns && (controls.view.manual || (controls.view.mode === "GAME" && visionTuning.view.detectorMode === "colour")) && (visionTuning.view.detectorMode === "ball" || profile.count>0) && !controls.view.pending && !visionTuning.view.detector.running;onClicked:visionTuning.action("detection.start")}
+                Button {objectName:"tuningDetectorStart";text:"Запустить проверку";enabled:controls.view.owns && (controls.view.manual || (controls.view.mode === "GAME" && visionTuning.view.detectorMode === "colour")) && (visionTuning.view.detectorMode !== "colour" || profile.count>0) && !controls.view.pending && !visionTuning.view.detector.running;onClicked:visionTuning.action("detection.start")}
                 Button {text:"Остановить проверку";enabled:controls.view.owns && !controls.view.pending;onClicked:visionTuning.action("detection.stop")}
                 Button {text:"Обновить список стримов";enabled:backend.view.connected;onClicked:streams.refresh()}
             }
@@ -144,11 +144,13 @@ ScrollView {
             }
             Label {
                 property var result:visionTuning.view.detector.result
-                text:result ? "Кадр "+result.frame_sequence+" · "+(visionTuning.view.detector.mode === "ball" ? (result.valid ? "мяч найден: X="+result.x_m.toFixed(3)+", Y="+result.y_m.toFixed(3)+" м" : "мяч не принят: "+result.reason) : (root.names[result.profile] || result.profile)+" · областей: "+result.total_blobs+" · отсев по площади: "+result.area_rejected)+" · возраст: "+visionTuning.view.detector.age_ms+" мс" : "Результат ещё не получен. Запустите детектор и запросите статус."
+                text:result ? "Кадр "+result.frame_sequence+" · "+(visionTuning.view.detector.mode !== "colour" ? (result.valid ? "мяч найден: X="+result.x_m.toFixed(3)+", Y="+result.y_m.toFixed(3)+" м" : "мяч не принят: "+result.reason) : (root.names[result.profile] || result.profile)+" · областей: "+result.total_blobs+" · отсев по площади: "+result.area_rejected)+" · возраст: "+visionTuning.view.detector.age_ms+" мс" : "Результат ещё не получен. Запустите детектор и запросите статус."
                 Layout.fillWidth:true;wrapMode:Text.Wrap
             }
-            Label {text:"Мяч: сверху — исходник с решениями и оранжевая маска; снизу — зелёная и белая опора. selected — выбран; no_field — нет опоры; projection — луч вне калибровки/над горизонтом; range — вне допустимой дальности; area_rejected — отсев по площади. Красные рамки — отклонённые кандидаты. Выбор прекращается на первом подходящем из десяти нижних кандидатов, как в игре.";Layout.fillWidth:true;wrapMode:Text.Wrap}
-            Label {text:"Координаты мяча: X вперёд, Y влево относительно направления головы, метры. Нужны синхронизация IMU и профиль камеры. Диагностика не ставит робота в стойку: высота камеры должна соответствовать game.camera_height_m; у расслабленного робота дальность может быть неверной. Линии, круг и ворота проверяются через «Локализацию» и стрим localisation.";Layout.fillWidth:true;wrapMode:Text.Wrap}
+            Label {text:visionTuning.view.detectorMode === "football" ? "Simple football: перед запуском явно установите base_stand и голову. Диагностика сама не двигает робот. После движения тела/головы перезапустите проверку. Рамки post/bar — подтверждённые элементы, координаты мяча — относительно тела." : "Мяч: сверху — исходник с решениями и оранжевая маска; снизу — зелёная и белая опора. selected — выбран; no_field — нет опоры; projection — луч вне калибровки/над горизонтом; range — вне допустимой дальности; area_rejected — отсев по площади. Красные рамки — отклонённые кандидаты.";Layout.fillWidth:true;wrapMode:Text.Wrap}
+            Label {text:visionTuning.view.detectorMode === "football"
+                ? "На видео Simple football: X вперёд, Y влево относительно тела, миллиметры. H — расчётная высота камеры; схема справа показывает проём ворот и луч удара. Нужны синхронизация IMU, профиль камеры и согласованные game.camera_height_m, game.camera_reference_tilt, game.camera_forward_m. Локализация по карте не используется."
+                : "Координаты мяча: X вперёд, Y влево относительно направления головы, метры. Нужны синхронизация IMU и профиль камеры. Диагностика не ставит робота в стойку: высота камеры должна соответствовать game.camera_height_m; у расслабленного робота дальность может быть неверной. Линии, круг и ворота проверяются через «Локализацию» и стрим localisation.";Layout.fillWidth:true;wrapMode:Text.Wrap}
             RawDetails {text:JSON.stringify(visionTuning.view.detector,null,2);Layout.fillWidth:true}
         }
         Button {text:"Отменить все черновики";enabled:visionTuning.view.dirty;onClicked:visionTuning.discard()}

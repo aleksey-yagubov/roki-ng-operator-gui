@@ -94,6 +94,25 @@ class OperatorTests(unittest.TestCase):
         wait_until(lambda: "value" in self.controller.param_parts and "description" in self.controller.param_parts)
         self.assertEqual(self.controller.param_parts["value"], -1500)
 
+    def test_kick_type_is_saved_through_standard_parameter_editor_without_motion(self):
+        self.connect()
+        c = self.controller
+        c.control.acquire()
+        wait_until(lambda: c.control.owns)
+        c.inspectParameter('motion.kick_type')
+        wait_until(lambda: 'choices' in c.param_parts and 'value' in c.param_parts)
+        self.assertEqual(c.param_parts['choices'], ['software', 'controller'])
+        self.assertEqual(c.param_parts['value'], 'software')
+        c.saveParameter('motion.kick_type', 'controller')
+        wait_until(lambda: c.param_parts.get('value') == 'controller')
+        self.assertEqual(self.robot.values['motion.kick_type'], 'controller')
+        before = len([m for m in self.robot.requests if m['op'] == 'params.set'])
+        c.saveParameter('motion.kick_type', 'invalid')
+        QTest.qWait(50)
+        self.assertEqual(len([m for m in self.robot.requests if m['op'] == 'params.set']), before)
+        self.assertFalse(any(m['op'].startswith('motion.') or m['op'] == 'test.start'
+                             for m in self.robot.requests))
+
     def test_rtt_and_video_responses_do_not_invalidate_unrelated_panels(self):
         self.connect()
         c = self.controller
