@@ -303,10 +303,15 @@ class FakeRobot:
                 "cycles": {"type": "int", "min": 1, "max": 100, "default": 10, "when": "custom"},
                 "right_leg": {"type": "bool", "default": True, "when": "custom"}})
         if op == "params.describe":
+            if body['key'] == 'motion.kick_type':
+                return dict(key=body['key'], type='str', default='software',
+                            choices=['software', 'controller'], apply='next_job',
+                            description='Тип удара')
             return dict(key=body["key"], type="int", default=-1500, min=-2600, max=950,
                         apply="next_operation", description="Положение головы для поля")
         if op == "params.get":
-            return {"key": body["key"], "value": self.values.get(body["key"], -1500)}
+            return {"key": body["key"], "value": self.values.get(body["key"],
+                    'software' if body['key'] == 'motion.kick_type' else -1500)}
         if op == "control.acquire":
             self.owner = self.session
             return {"lease_epoch": self.lease}

@@ -18,6 +18,8 @@ RowLayout {
             number.text = initialValue === undefined ? "" : String(initialValue)
     }
     onInitialValueChanged: { if (!commitOnFinish || !number.activeFocus) reset() }
+    // params.get may precede params.describe; reset after the choice model binds.
+    onMetaChanged: { if (meta.choices) Qt.callLater(reset) }
     Component.onCompleted: reset()
     ComboBox {
         id: choice

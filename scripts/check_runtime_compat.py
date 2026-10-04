@@ -112,6 +112,20 @@ def main():
                 wait_until(lambda: controller.param_parts.get("key") == "head.field_tilt" and "value" in controller.param_parts)
                 controller.saveParameter("head.field_tilt", "-1200")
                 wait_until(lambda: controller.param_parts.get("value") == -1200)
+                controller.inspectParameter('motion.kick_type')
+                wait_until(lambda: 'choices' in controller.param_parts and 'value' in controller.param_parts)
+                assert controller.param_parts['choices'] == ['software', 'controller']
+                result['kick_jobs'] = []
+                for kick_type in ('controller', 'software'):
+                    controller.saveParameter('motion.kick_type', kick_type)
+                    wait_until(lambda: controller.param_parts.get('value') == kick_type and not c.pending)
+                    previous = c.job.get('job_id')
+                    c.kick('right', 80)
+                    wait_until(lambda: c.job.get('job_id') != previous and not c.pending)
+                    wait_until(lambda: c.job.get('status') in ('completed', 'failed', 'cancelled'), 12000)
+                    assert c.job['status'] == 'completed', c.job
+                    assert c.job['kick_type'] == kick_type, c.job
+                    result['kick_jobs'].append(dict(c.job))
                 c.release()
                 wait_until(lambda: not c.owns and not c.pending)
                 assert not c.error, c.error
