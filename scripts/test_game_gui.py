@@ -26,6 +26,8 @@ def main():
         engine = QQmlApplicationEngine()
         engine.addImageProvider('streams', VideoImageProvider(backend.streams))
         engine.rootContext().setContextProperty('game', backend.game)
+        engine.rootContext().setContextProperty('backend', backend)
+        engine.rootContext().setContextProperty('fieldEditor', backend.field_editor)
         engine.rootContext().setContextProperty('streams', backend.streams)
         engine.rootContext().setContextProperty('localisation', backend.localisation)
         warnings = []
@@ -75,6 +77,16 @@ def main():
             wait_until(lambda: backend.control.mode == 'MANUAL' and not backend.control.pending)
             robot.game_running = False
             assert item('gameStart').property('enabled')
+            backend.game.loadSettings()
+            wait_until(lambda: backend.game.view['visualLocalisationKnown'])
+            for index, strategy in enumerate(('FIRA_penalty_Goalkeeper', 'forward', 'ball_kick_test', 'simple_football')):
+                item('gameRole').setProperty('currentIndex', index)
+                app.processEvents()
+                assert item('gameRole').property('currentText') == strategy
+                assert item('gameEntry').property('enabled') == (strategy in ('forward', 'simple_football'))
+                assert item('gameVisualLocalisation').property('enabled') == (strategy in ('forward', 'FIRA_penalty_Goalkeeper'))
+            assert not any(m['op'] in ('game.start', 'params.set') for m in robot.requests)
+            item('gameRole').setProperty('currentIndex', 0)
             QMetaObject.invokeMethod(item('gameStart'), 'clicked')
             wait_until(lambda: backend.game.view['running'])
             assert item('gameStop').property('enabled')

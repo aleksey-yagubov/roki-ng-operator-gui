@@ -25,10 +25,44 @@ ScrollView {
     ColumnLayout {
         width: root.availableWidth
         SelectableLabel { text: "Автономная игра"; font.bold: true }
+        Button {
+            text: "Загрузить настройки игры и ворот"
+            enabled: backend.view.connected && !fieldEditor.view.busy
+            onClicked: { fieldEditor.refresh(); game.loadSettings() }
+        }
+        SelectableLabel {
+            text: fieldEditor.view.ownColour === "yellow" ? "Свои: жёлтые. Бьём в синие."
+                : fieldEditor.view.ownColour === "blue" ? "Свои: синие. Бьём в жёлтые."
+                : "Загрузите карту и проверьте цвета ворот."
+            Layout.fillWidth: true; wrapMode: Text.Wrap
+        }
+        RowLayout {
+            enabled: fieldEditor.view.ownColourReady && game.view.canStart
+            Button { text: "Свои жёлтые"; onClicked: fieldEditor.ownColour("yellow") }
+            Button { text: "Свои синие"; onClicked: fieldEditor.ownColour("blue") }
+        }
+        SelectableLabel { text: fieldEditor.view.notice; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        CheckBox {
+            objectName: "gameVisualLocalisation"
+            text: "Локализация по камере (для исходного футбола, со следующего старта)"
+            enabled: game.view.visualLocalisationKnown && game.view.canStart && (role.currentText === "forward" || role.currentText === "FIRA_penalty_Goalkeeper")
+            checked: game.view.visualLocalisation
+            onClicked: game.setVisualLocalisation(checked)
+        }
         SelectableLabel { text: "Запуск включает движения. Стартовый манёвр center настраивается через params: game.forward.kick_off_ride. Повторный ввод — после готовности Pick up."; wrapMode: Text.Wrap; Layout.fillWidth: true }
         RowLayout {
-            ComboBox { id: role; objectName: "gameRole"; model: ["FIRA_penalty_Goalkeeper", "forward"] }
-            ComboBox { id: entry; objectName: "gameEntry"; model: ["center", "left", "right"]; enabled: role.currentText === "forward" }
+            ComboBox { id: role; objectName: "gameRole"; model: ["FIRA_penalty_Goalkeeper", "forward", "ball_kick_test", "simple_football"] }
+            ComboBox { id: entry; objectName: "gameEntry"; model: ["center", "left", "right"]; enabled: role.currentText === "forward" || role.currentText === "simple_football" }
+        }
+        SelectableLabel {
+            visible: role.currentText === "simple_football"
+            text: "Simple football: без карты и одометрии. Left/right: ввод вперёд. Немедленный center: kickoff на 60° вбок, до 30 с. Задержка отключает kickoff. Прыжки с 250 мм, до 15 на попытку."
+            Layout.fillWidth: true; wrapMode: Text.Wrap
+        }
+        SelectableLabel {
+            visible: role.currentText === "ball_kick_test"
+            text: "Тест подхода и удара: мяч перед роботом, свободное место впереди. Без ворот, карты и kickoff. До 5 прыжков доводки, один удар и завершение. При потере мяча или ошибке — завершение без повтора."
+            Layout.fillWidth: true; wrapMode: Text.Wrap
         }
         RowLayout {
             SelectableLabel { text: "Задержка, с" }

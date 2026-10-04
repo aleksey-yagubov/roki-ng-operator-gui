@@ -165,17 +165,17 @@ class FakeRobot:
                 assert self.owner == self.session and body['lease_epoch'] == self.lease
             if op == "game.start":
                 assert self.mode == "MANUAL" or (self.mode == 'GAME' and self.game_pickup and self.game_ready)
-                assert body['strategy'] in ('FIRA_penalty_Goalkeeper', 'forward')
+                assert body['strategy'] in ('FIRA_penalty_Goalkeeper', 'forward', 'ball_kick_test', 'simple_football')
                 assert set(body) <= {'strategy', 'entry', 'delay_seconds', 'lease_epoch'}
                 assert type(body['delay_seconds']) is int
                 assert 0 <= body['delay_seconds'] <= 30
                 self.game_role = body['strategy']
-                if self.game_role == 'forward':
+                if self.game_role in ('forward', 'simple_football'):
                     self.game_entry = body.get('entry', 'center')
                     assert self.game_entry in ('center', 'left', 'right')
                 else:
                     assert 'entry' not in body
-                    self.game_entry = 'goalkeeper'
+                    self.game_entry = 'center' if self.game_role == 'ball_kick_test' else 'goalkeeper'
                 self.game_paused = self.game_pickup = self.game_ready = self.game_confirm = False
                 self.game_running = True
                 self.mode = "GAME"
@@ -310,6 +310,8 @@ class FakeRobot:
             return dict(key=body["key"], type="int", default=-1500, min=-2600, max=950,
                         apply="next_operation", description="Положение головы для поля")
         if op == "params.get":
+            if body['key'] == 'game.use_visual_localisation':
+                return {'key': body['key'], 'value': self.values.get(body['key'], True)}
             return {"key": body["key"], "value": self.values.get(body["key"],
                     'software' if body['key'] == 'motion.kick_type' else -1500)}
         if op == "control.acquire":

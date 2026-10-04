@@ -157,7 +157,7 @@ class VisionTuning(QObject):
 
     @Slot(str)
     def selectDetector(self,mode):
-        if mode in ('colour','ball'):
+        if mode in ('colour','ball','football'):
             self.detector_mode=mode;self.changed.emit()
 
     @Slot(str)
@@ -166,8 +166,8 @@ class VisionTuning(QObject):
         if op=='detection.start' and self.detector_mode=='colour' and self.profile not in self.profiles:
             self.notice='Сначала загрузите настройки и выберите цветовой фильтр.';self.changed.emit();return
         args=({'mode':self.detector_mode,'profile':self.profile} if self.detector_mode=='colour'
-              else {'mode':'ball'}) if op=='detection.start' else {}
-        if op=='detection.start' and self.detector_mode=='ball' and self.control.mode=='GAME':
+              else {'mode':self.detector_mode}) if op=='detection.start' else {}
+        if op=='detection.start' and self.detector_mode in ('ball','football') and self.control.mode=='GAME':
             self.notice='Остановите игру перед отдельной диагностикой мяча.';self.changed.emit();return
         sent=self.control.command(op,args,manual=op.endswith('.start') and self.control.mode != 'GAME',job=False,context='tuning:action')
         if not sent:
