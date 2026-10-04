@@ -1,7 +1,7 @@
 """Field draft UI over the existing params transport; no independent storage."""
 from copy import deepcopy
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import QObject, Property, Signal, Slot, QTimer
 
 from .control import scalar
 
@@ -15,6 +15,7 @@ class FieldEditor(QObject):
         self.values={};self.metas={};self.drafts={}
         self.selected='field.geometry';self.pending=[];self.notice='Загрузите карту с робота.'
         self.busy=False
+        self.save_queue=[]
         session.response.connect(self.response)
         session.failed.connect(self.failed)
         session.changed.connect(self.connection)
@@ -29,12 +30,13 @@ class FieldEditor(QObject):
                     meta=self.metas.get(self.selected,{}),
                     draft=self.drafts.get(self.selected,self.values.get(self.selected,{})),
                     dirty=self.selected in self.drafts,notice=self.notice,busy=self.busy,
-                    available=bool(self.metas),keys=list(self.values))
+                    available=bool(self.metas),keys=list(self.values),draftCount=len(self.drafts))
 
     @Slot()
     def connection(self):
         if not self.session.connected:
             self.busy=False;self.pending=[];self.values={};self.metas={};self.drafts={}
+            self.save_queue=[]
             self.notice='Нет соединения. Загрузите профиль после подключения.'
             self.changed.emit()
 
@@ -73,11 +75,19 @@ class FieldEditor(QObject):
             key=result['key'];self.values[key]=result['value'];self.drafts.pop(key,None)
             self.notice='Сохранено на роботе. Применится при следующем запуске локализации.'
             self.changed.emit()
+        elif context.startswith('field:template-save:'):
+            key=result['key'];self.values[key]=result['value'];self.drafts.pop(key,None)
+            self.changed.emit()
+            QTimer.singleShot(0,self.saveNext)
 
     def failed(self,op,error,context):
         if context.startswith('field:'):
             self.busy=False;self.pending=[]
-            self.notice=str(error.get('message',error) if isinstance(error,dict) else error);self.changed.emit()
+            self.save_queue=[]
+            self.notice=str(error.get('message',error) if isinstance(error,dict) else error)
+            if context.startswith('field:template-save:'):
+                self.notice+=' Часть карты могла сохраниться; оставшиеся черновики сохранены в GUI. Не запускайте игру до завершения карты.'
+            self.changed.emit()
 
     @Slot(str)
     def select(self,key):
@@ -85,6 +95,7 @@ class FieldEditor(QObject):
 
     @Slot('QVariant')
     def edit(self,value):
+        if self.busy:return
         try:
             self.drafts[self.selected]=scalar(self.metas[self.selected],value)
             self.notice='Черновик. Робот пока использует сохранённую карту.'
@@ -93,16 +104,19 @@ class FieldEditor(QObject):
 
     @Slot()
     def defaults(self):
+        if self.busy:return
         if self.selected in self.metas:
             self.drafts[self.selected]=deepcopy(self.metas[self.selected]['default'])
             self.changed.emit()
 
     @Slot()
     def discard(self):
+        if self.busy:return
         self.drafts.pop(self.selected,None);self.changed.emit()
 
     @Slot()
     def save(self):
+        if self.busy:return
         if self.selected not in self.drafts:return
         self.control.command('params.set',{'key':self.selected,'value':self.drafts[self.selected],
             'expected_value':self.values[self.selected]},
@@ -133,6 +147,7 @@ class FieldEditor(QObject):
 
     @Slot()
     def addMark(self):
+        if self.busy:return
         for key,value in (self.values|self.drafts).items():
             if key.startswith('field.mark.') and not value['enabled']:
                 self.selected=key
@@ -142,6 +157,56 @@ class FieldEditor(QObject):
 
     @Slot()
     def removeMark(self):
+        if self.busy:return
         if self.selected.startswith('field.mark.'):
             value=deepcopy(self.drafts.get(self.selected,self.values[self.selected]))
             value['enabled']=False;self.edit(value)
+
+    @Slot()
+    def competitionTemplate(self):
+        if self.busy:return
+        if self.drafts:
+            self.notice='Сохраните или отмените текущие черновики перед выбором шаблона.'
+            self.changed.emit();return
+        from .field_templates import competition_field
+        try:
+            draft=competition_field(self.values)
+            # Validate everything before replacing any draft.
+            draft={k:scalar(self.metas[k],v) for k,v in draft.items()}
+        except (KeyError,ValueError,TypeError):
+            self.notice='Сначала полностью загрузите карту с робота.'
+            self.changed.emit();return
+        self.drafts={k:v for k,v in draft.items() if v!=self.values[k]}
+        self.selected='field.geometry'
+        self.notice=('Черновик 3,40 × 2,40 м: 6 точек Ø5 см, 3 палочки 15,5 см, '
+                     'вратарские площадки. Проверьте толщину краски и ворота; '
+                     'сохранение заменит прежние метки. Робот пока не изменён.')
+        self.changed.emit()
+
+    @Slot()
+    def discardAll(self):
+        if self.busy:return
+        self.drafts={};self.notice='Черновики отменены. На роботе ничего не изменено.'
+        self.changed.emit()
+
+    @Slot()
+    def saveAll(self):
+        if self.busy or not self.drafts:return
+        self.save_queue=list(self.drafts)
+        self.busy=True
+        self.notice='Сохранение карты по объектам. Не запускайте локализацию/игру до завершения.'
+        self.changed.emit();self.saveNext()
+
+    def saveNext(self):
+        if not self.busy:return
+        if not self.save_queue:
+            self.busy=False
+            self.notice='Вся карта сохранена. Перезапустите локализацию для применения.'
+            self.changed.emit();return
+        key=self.save_queue.pop(0)
+        if not self.control.command('params.set',{'key':key,'value':deepcopy(self.drafts[key]),
+                                    'expected_value':self.values[key]},manual=False,job=False,
+                                    context='field:template-save:'+key):
+            self.busy=False;self.save_queue=[]
+            self.notice='Сохранение остановлено. Несохранённые черновики оставлены; проверьте управление.'
+            self.changed.emit()
